@@ -448,7 +448,7 @@ T1–T10 保留，修订与新增：
 |---|---|---|
 | M1 核心引擎（第 1–2 周）✅ 2026-08-30 | `bright-drift-core` 七模块 + 单测（E1–E6、E12、E16–E18 全覆盖；bash/pwsh 静态分析用例） | 引擎单测全绿（113 用例 / 14 文件），脱离 dsh 可跑（commit `aac2c05`） |
 | M2 dsh 集成（第 3 周）✅ 2026-08-30 | adapter 绑定；FR-1~FR-4、FR-7（含 pwsh）全通；E7/E11/E14/E15/E16 端到端 | 真实 headless 会话 E2E 全通（见 §8.3）；adapter 19 用例 + core 115 用例全绿 |
-| M3 打磨与发布（第 4 周） | settings + 项目级覆盖、/bright-drift 命令族、日志、文档、npm 发布（bundle patch 形态）、README 演示 | 陌生人 `dsh plugin --profile web add bright-drift` 10 分钟可用 |
+| M3 打磨与发布（第 4 周）✅ 2026-08-30（`npm publish` 动作为用户保留） | settings + 项目级覆盖、/bright-drift 命令族、日志、文档、npm 发布（bundle patch 形态）、README 演示 | 发布就绪：MIT LICENSE、双包元数据 + README、`pnpm pack` 白名单正确（adapter 含 `cordis.patch.yml`，`workspace:*` 发布时重写为 `0.1.0`）；性能门达标（reconcile 10 万条目 46ms、pre-step 决策 0.014µs/次、归因分类 0.19µs/次、AKB 快照往返 100k 188ms）；`pnpm publish -r` 需用户 npm 凭据，留作手动步骤 |
 
 ### 8.3 M2 端到端实测记录（2026-08-30，headless profile `bddev`）
 
