@@ -39,4 +39,24 @@ describe('DriftQueue', () => {
     expect(q.peek()).toHaveLength(1);
     expect(q.size).toBe(1);
   });
+
+  it('commitRendered removes rendered records but keeps re-detected ones (sync-point race)', () => {
+    const q = new DriftQueue();
+    q.push(record('a.ts', 'modified', { at: 1 }));
+    q.push(record('b.ts', 'modified', { at: 1 }));
+    const rendered = q.peek();
+    // A newer drift for a.ts lands between peek and commit.
+    q.push(record('a.ts', 'modified', { at: 2 }));
+    q.commitRendered(rendered);
+    const rest = q.peek();
+    expect(rest).toHaveLength(1);
+    expect(rest[0]).toMatchObject({ path: 'a.ts', at: 2 });
+  });
+
+  it('commitRendered of everything empties the queue', () => {
+    const q = new DriftQueue();
+    q.push(record('a.ts', 'modified'));
+    q.commitRendered(q.peek());
+    expect(q.isEmpty()).toBe(true);
+  });
 });

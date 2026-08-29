@@ -1,0 +1,5 @@
+# bright-drift bundle patch: insert one host-plane plugin row (D1).
+# Row format verified against @deepseek-ai/dsh-base/cordis.patch.yml (M0-5).
+- insert:
+    - id: bright-drift
+      name: bright-drift
