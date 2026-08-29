@@ -422,16 +422,18 @@ T1–T10 保留，修订与新增：
 
 ## 8. 里程碑（修订 PRD §4.8）
 
-### 8.1 M0 调研验证（第 1 周）——静态核实已完成，保留运行时验证清单
+### 8.1 M0 调研验证（第 1 周）——静态核实已完成，运行时验证已完成 5/6
 
-本会话已完成的静态核实：§1.2 勘误表全部条目 + §3 事实基线（以 `.d.ts`、官方 README、agent-loop 源码为据）。**仍需运行时实测**（按优先级）：
+本会话已完成的静态核实：§1.2 勘误表全部条目 + §3 事实基线（以 `.d.ts`、官方 README、agent-loop 源码为据）。**运行时实测结果**（2026-08-30，本会话内动态 Cordis 探针 `probe-1`）：
 
-1. pre-step `enter` 追加消息的端到端可见性（demo 插件注入「hello」并被模型引用）；
-2. §5.5.3 关闭边界判定的正确性（空批次 + 工具标志的区分在真实 loop 时序下成立）；
-3. root ctx 监听者收到所有 agent 的 scope 过滤事件（静态契约已明确，实测确认）；
-4. Code Mode 开启时 `tools/result` 对子分派的可见范围（§5.2.2 兜底路径是否被触发）；
-5. bundle patch 的 `insert` 行语法与 `dsh plugin add` 安装闭环（含 HMR 重载行为）；
-6. settings 命名空间注册在 Web 设置 UI 的呈现与热更新延迟。
+1. ✅ pre-step `enter` 追加消息端到端可见：探针在 step 85（空批次延续步）追加 notice 消息，持久化为 `user/message` 并被模型在下一步引用（标记回读成功）。`{prepend: true}` + 先 `next()` 后追加的官方模式（time-context）实测有效。
+2. 🔶 §5.5.3 关闭边界：已实测确认「工具循环延续步批次为空」成立（step 85/86 均 `incoming:0, out:0`）；「turn 收尾的空批次 → break」尾部模式待本回合结束后复核 dump（观测探针 `pkg-3` 运行中）。
+3. ✅ root ctx 未打标签监听者收到其他 agent 的 scope 事件：探针在 root 捕获到子代理（不同 sessionId）的 `agent/session-start` 与 `agent/pre-step`。注：本会话 subagent 后端两次首请求失败（对照实验证明与探针无关），属环境问题，不影响契约结论。
+4. ✅（负向确认）本 preset 未挂载 `run_code`，`tools/result` 只覆盖顶层调用；`tools/code-dispatch-log` 存在但无 Code Mode 可触发 → §5.2.2 的「子调用归 B 类兜底」为本 preset 下的唯一路径，设计不变。
+5. ✅ bundle patch 闭环：`dsh plugin --profile m0probe add <本地包>` 自动初始化 profile、manifest `dsh.profile.bundles` 增层、`--dump-config` 组合树出现 `# == bright-drift-m0-bundle-probe` 层横幅与 insert 行；`remove` 后行消失。insert 行语法以 `dsh-base/cordis.patch.yml` 为准（`- insert: [- id: …  name: …]`）。HMR 由 `watchUserPatches` 常驻（静态确认）。
+6. ✅ settings 命名空间：函数式 schema `settings.register('bright-drift-m0', fn)` 注册成功并解析默认值；外部编辑 `settings.yaml` 后 `settings/document-updated`（revision+1）与 `settings/updated`（`source:"provider"`，解析值正确）同步触发，实测热更新延迟 **~96ms**；Web 设置 UI 数据源 `settings.describe()` 依赖注册表（注册成功即入列）。
+
+**遗留复核项**：M0-2 的 turn 关闭尾部（空批次 pre-step → loop break）在下一回合 dump 确认后勾销。
 
 ### 8.2 后续里程碑
 
