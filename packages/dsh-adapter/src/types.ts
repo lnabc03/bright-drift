@@ -78,6 +78,8 @@ export interface FsServiceLike {
 export interface CtxLike {
   get(name: string): unknown;
   on(name: string, listener: (...args: never[]) => unknown, options?: { prepend?: boolean }): () => void;
+  /** Register a fiber-owned effect; the returned disposer runs on plugin dispose. */
+  effect(callback: () => (() => void) | void, label?: string): unknown;
 }
 
 export interface SettingsScopeLike<T> {

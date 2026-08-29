@@ -10,15 +10,22 @@ import { logsDir } from './paths.js';
 export class Logger {
   private dirReady: Promise<void> | undefined;
 
+  /** Optional directory override (tests); defaults to ~/.dsh/logs/bright-drift. */
+  constructor(private readonly dir?: string) {}
+
+  private target(): string {
+    return this.dir ?? logsDir();
+  }
+
   private ensure(): Promise<void> {
-    this.dirReady ??= fs.mkdir(logsDir(), { recursive: true }).then(() => undefined);
+    this.dirReady ??= fs.mkdir(this.target(), { recursive: true }).then(() => undefined);
     return this.dirReady;
   }
 
   /** Fire-and-forget structured log line. `fields` must be content-free. */
   log(event: string, fields: Record<string, unknown> = {}): void {
     const line = JSON.stringify({ t: new Date().toISOString(), event, ...fields }) + '\n';
-    const file = path.join(logsDir(), `${new Date().toISOString().slice(0, 10)}.log`);
+    const file = path.join(this.target(), `${new Date().toISOString().slice(0, 10)}.log`);
     this.ensure()
       .then(() => fs.appendFile(file, line))
       .catch(() => {

@@ -68,6 +68,7 @@ docs/              # PRD、设计文档（当前在仓库根，M1 时迁入）
 - 日志只记哈希、路径、计数，**永不记录文件内容**（PRD FR-6）。
 - content-store 的 blob 落盘在 `~/.dsh/state/bright-drift/blobs/`，属于用户本机状态，不进仓库、不上传。
 - 插件不发起任何网络请求（一期无遥测）。
+- **操作 `~/.dsh/` 下的用户文件（settings.yaml、profile、preset）时**：只读用 `read` 工具；修改必须字节级或显式 UTF-8 读写，**禁止**经 Windows PowerShell 5.1 默认编码（GBK）往返——会把非 ASCII 内容（含换行）损毁（2026-08-30 实测事故）。改动前先备份。
 
 ## 6. 配置与状态位置（实现时遵循）
 

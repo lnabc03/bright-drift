@@ -153,4 +153,18 @@ export function apply(ctx: CtxLike): void {
   }
 
   logger.log('plugin.applied', { shellToolName });
+
+  // Fiber-owned teardown: release all watchers and flush AKB snapshots when
+  // the host disposes the plugin (headless one-shot exit path relies on
+  // context disposal to drain the event loop — chokidar would otherwise
+  // keep the process alive).
+  ctx.effect(() => {
+    return () => {
+      void watchers.stopAll().catch((e) => logger.error('watcher.stopAll', e));
+      void Promise.all(
+        registry.all().map((s) => saveAgentState(s, logger)),
+      ).catch((e) => logger.error('teardown.persist', e));
+      logger.log('plugin.disposed', {});
+    };
+  }, 'bright-drift:teardown');
 }

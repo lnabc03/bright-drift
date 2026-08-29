@@ -16,11 +16,12 @@ let state: AgentState;
 let registry: StateRegistry;
 let resolver: ConfigResolver;
 let contentStore: ContentStore;
-const logger = new Logger(); // logs go to ~/.dsh; failures are swallowed by design
+let logger: Logger;
 
 beforeEach(async () => {
   ws = await fs.mkdtemp(path.join(tmpdir(), 'bright-drift-ws-'));
   storeDir = await fs.mkdtemp(path.join(tmpdir(), 'bright-drift-blobs-'));
+  logger = new Logger(storeDir); // keep tests out of the real ~/.dsh/logs
   registry = new StateRegistry();
   resolver = new ConfigResolver();
   contentStore = new ContentStore(storeDir, { maxBytes: 1024 * 1024 });
