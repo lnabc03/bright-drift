@@ -437,7 +437,7 @@ T1–T10 保留，修订与新增：
 
 | 里程碑 | 内容 | 验收 |
 |---|---|---|
-| M1 核心引擎（第 1–2 周） | `bright-drift-core` 七模块 + 单测（E1–E6、E12、E16–E18 全覆盖；bash/pwsh 静态分析用例） | 引擎单测全绿，脱离 dsh 可跑 |
+| M1 核心引擎（第 1–2 周）✅ 2026-08-30 | `bright-drift-core` 七模块 + 单测（E1–E6、E12、E16–E18 全覆盖；bash/pwsh 静态分析用例） | 引擎单测全绿（113 用例 / 14 文件），脱离 dsh 可跑（commit `aac2c05`） |
 | M2 dsh 集成（第 3 周） | adapter 绑定；FR-1~FR-4、FR-7（含 pwsh）全通；E7/E11/E14/E15/E16 端到端 | 真实会话演示三个痛点场景 + T9/T9′/T10/T11 |
 | M3 打磨与发布（第 4 周） | settings + 项目级覆盖、/bright-drift 命令族、日志、文档、npm 发布（bundle patch 形态）、README 演示 | 陌生人 `dsh plugin --profile web add bright-drift` 10 分钟可用 |
 
