@@ -21,6 +21,19 @@
   "engines": {
     "node": ">=20"
   },
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "ai-agent",
+    "workspace",
+    "drift-detection"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lnabc03/bright-drift.git",
+    "directory": "packages/dsh-adapter"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "vitest run",

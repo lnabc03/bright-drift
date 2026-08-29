@@ -1,6 +1,6 @@
 {
   "name": "bright-drift-core",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Platform-independent workspace-drift detection engine for AI coding agents.",
   "license": "MIT",
   "type": "module",
@@ -17,6 +17,19 @@
   ],
   "engines": {
     "node": ">=20"
+  },
+  "keywords": [
+    "ai-agent",
+    "coding-agent",
+    "workspace",
+    "file-watcher",
+    "drift-detection",
+    "attribution"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lnabc03/bright-drift.git",
+    "directory": "packages/core"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
