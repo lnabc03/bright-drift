@@ -40,6 +40,17 @@ export class DriftQueue {
     return all;
   }
 
+  /**
+   * Sync-Point commit: remove exactly the rendered records, keeping any
+   * record that was replaced (re-detected) after the render snapshot —
+   * object identity guards the race between peek and commit (§5.5.2).
+   */
+  commitRendered(rendered: DriftRecord[]): void {
+    for (const r of rendered) {
+      if (this.records.get(r.path) === r) this.records.delete(r.path);
+    }
+  }
+
   clear(): void {
     this.records.clear();
   }

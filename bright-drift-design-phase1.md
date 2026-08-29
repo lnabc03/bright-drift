@@ -447,8 +447,21 @@ T1–T10 保留，修订与新增：
 | 里程碑 | 内容 | 验收 |
 |---|---|---|
 | M1 核心引擎（第 1–2 周）✅ 2026-08-30 | `bright-drift-core` 七模块 + 单测（E1–E6、E12、E16–E18 全覆盖；bash/pwsh 静态分析用例） | 引擎单测全绿（113 用例 / 14 文件），脱离 dsh 可跑（commit `aac2c05`） |
-| M2 dsh 集成（第 3 周） | adapter 绑定；FR-1~FR-4、FR-7（含 pwsh）全通；E7/E11/E14/E15/E16 端到端 | 真实会话演示三个痛点场景 + T9/T9′/T10/T11 |
+| M2 dsh 集成（第 3 周）✅ 2026-08-30 | adapter 绑定；FR-1~FR-4、FR-7（含 pwsh）全通；E7/E11/E14/E15/E16 端到端 | 真实 headless 会话 E2E 全通（见 §8.3）；adapter 19 用例 + core 115 用例全绿 |
 | M3 打磨与发布（第 4 周） | settings + 项目级覆盖、/bright-drift 命令族、日志、文档、npm 发布（bundle patch 形态）、README 演示 | 陌生人 `dsh plugin --profile web add bright-drift` 10 分钟可用 |
+
+### 8.3 M2 端到端实测记录（2026-08-30，headless profile `bddev`）
+
+**测试环境**：`bddev` profile = dsh-base + dsh-headless + bright-drift（link 本地包）；`--dump-config` 确认三层组合树含 `# == bright-drift` 层与 insert 行。workspace = `<repo>/.e2e`（gitignored）。
+
+**Run 1（基线建立 + 生命周期）**：headless 任务创建 `drift-target.txt`。日志链路完整：`plugin.applied → session.start → watcher.acquired → baseline.update(source:write|read) → persist.saved(turn-stopping) → plugin.disposed → persist.saved(teardown)`。
+
+**Run 3（漂移注入 E2E，覆盖 T1/T3、FR-2/3/4/7、G1/G5）**：agent 读文件（baseline hash 90b46d = version=1）→ 执行 `Start-Sleep -Seconds 40`（`window.open`，FR-7 窗口）→ 窗口内第 1.4s 外部改为 version=2 → `drift.detected(modified)` → sleep 结束后下一个 pre-step `inject.rendered`（69 tokens）→ agent 步骤 3 重读看到 version=2（Sync Point 已 rebase，hash c76dd6）→ 最终回答**逐字引用 notice summary**：`COMMAND-SIDE-EFFECT  你的命令 \`Start-Sleep -Seconds 40\` 改动了 1 个文件：` 并报告 +1 -1 diff。归因 B 符合 E15 规则（入队时窗口已开 1.4s < longCommandMs 10s）。
+
+**M2 新发现（设计吸收）**：
+1. **teardown 必须 fiber 托管**：headless one-shot 的退出依赖 root context disposal（`appExit → fiber.dispose`）；chokidar watcher 若不随 fiber 释放会让进程永不退出。adapter 已在 `apply()` 注册 `ctx.effect` 反函数（stopAll watchers + 全量 AKB flush）。（E2E Run 1 首次以 10 分钟超时暴露此缺陷，修复后 exit 0。）
+2. headless profile 依赖 `@deepseek-ai/dsh-code-runtime-worker-thread`（安装树内提供，npm 未发布 `dsh-code-runtime-worker`）；自定义 headless profile 用「安装树双锚定」引用即可，无需 pnpm 拉取。
+3. Windows 无独立 pwsh 7 时 dsh-pwsh-local 回退 Windows PowerShell 5.1；本机可用（harness 自身 pwsh 工具同源）。
 
 ---
 

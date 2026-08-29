@@ -26,3 +26,5 @@ Thumbs.db
 
 # pnpm
 pnpm-debug.log*
+
+.e2e/
