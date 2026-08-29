@@ -1,12 +1,18 @@
 /**
- * Turn-closing-boundary suppression (design §5.5.3, E16).
+ * Turn-closing-boundary suppression (design §5.5.3, E16; revised by M0-2/F10).
  *
- * dsh's agent loop ends a turn when a pre-step collects an empty batch
- * after a step with no tool calls. Injecting into that empty batch would
- * force one extra full model request per turn. The adapter maintains a
- * per-agent `toolsRanSinceLastStep` flag (set on tools/result, cleared on
- * each pre-step read); this pure predicate carries the decision so it can
- * be unit-tested without the harness.
+ * M0 runtime measurement corrected the mechanism: dsh's loop breaks right
+ * after a no-tool step when the inbox is empty (agent-loop L564–571), so a
+ * normal turn close fires NO trailing empty-batch pre-step. Empty batches
+ * with no intervening tool calls remain only on two rare paths — a
+ * post-`turnEnds` empty claim (L542) and an empty first claim (L543) —
+ * where appending a message would force a model request that otherwise
+ * would not run. Injecting into tool-continuation steps (empty batch but
+ * tools ran) is free: the step runs regardless.
+ *
+ * The adapter maintains a per-agent `toolsRanSinceLastStep` flag (set on
+ * tools/result, cleared on each pre-step read); this pure predicate carries
+ * the decision so it can be unit-tested without the harness.
  */
 export interface PreStepContext {
   /** Whether the collected enter-batch already carries messages. */

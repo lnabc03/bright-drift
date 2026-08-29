@@ -39,6 +39,7 @@ PRD 的技术路线**成立**：dsh 的 Cordis 事件体系提供了 PRD §4.1 �
 | F7 | `ctx.settings.register(ns, schema)`：用户级 settings 命名空间，schema 校验 + 热更新 + Web 设置 UI | 配置主通道（§5.9） |
 | F8 | `ctx.timer`：debounce/throttle/interval，随 fiber 自动 dispose | watcher 防抖（§5.3） |
 | F9 | 依赖树已含 `chokidar@4.0.3` 与 `diff@9.0.0` | 版本对齐声明（§5.11） |
+| F10 | **turn 正常关闭不触发尾部空批次 pre-step**：上一步无工具调用且收件箱空时，loop 在该步结束后直接 `turn-stopping` → `break`（L564–571），不再有下一次 pre-step。空批次 pre-step 只出现在：工具循环延续步（`turnEnds` 未置位，step 本来就要跑）、L542（max-tokens 后续转向批次被领空）、L543（turn 首次领取为空即 completed 退出，无 step） | M0-2 实测 + 源码复核 → §5.5.3 机制修订 |
 
 ### 1.3 决策记录（2026-08-30，逐题确认）
 
@@ -77,7 +78,7 @@ N1–N5 保留。补充：
 | 事实 | 出处 |
 |---|---|
 | `agent/pre-step`：waterfall，payload `{agent, messages, turn, step, signal}`，返回 `PreStepDecision = {kind:'reject'} \| {kind:'enter', messages}`；`enter` 批次在 `step/start` 后逐条 `session.append("user/message")` **持久化** | `dsh-agent` runtime-types.d.ts；`dsh-agent-loop/lib/index.js` L492–554 |
-| turn 关闭边界：上一步无工具调用且本 pre-step 领取批次为空时 loop `break`；**向空批次追加消息会强制多跑一次模型请求** | 同上 L542–546 → 设计对策 §5.5.3 |
+| turn 关闭边界：上一步无工具调用且收件箱空时，loop 在**该步结束后**直接 `turn-stopping` → `break`（L564–571），**正常关闭不再有尾部空批次 pre-step**（M0-2 实测确认）；空批次 pre-step 仅存于三条路径：工具循环延续（step 照跑，注入免费搭车）、L542（turnEnds 已置位但批次领空，注入会强制多跑请求）、L543（turn 首领为空即 completed，注入会强制一个本不存在的 step） | 同上 L531–571 + M0-2 实测（§8.1-2） → 设计对策 §5.5.3 |
 | `tools/pre-execute`：waterfall，决策仅 `allow/deny/ask`，不可改参数 | `dsh-tools` types |
 | `tools/post-execute`：waterfall，`(exec, result, next)`，`exec` 含 name/深冻结 arguments/agent/signal；`result` 为 `ToolExecutionResult`（`value`/`content`/`additionalContexts`） | `dsh-tools` types |
 | `tools/result`：emit，冻结终态，fire-and-forget | 同上 |
@@ -258,19 +259,25 @@ ctx.on('agent/pre-step', async (payload, next) => {
 
 渲染成功且批次返回 = 已同步：AKB 对账为磁盘当前状态、队列清空。理由：dsh 在 `step/start` 后即持久化 `enter` 批次（C4），漂移消息已进入不可变的会话历史，即使模型请求随后失败，该事实也已送达 agent 的上下文——与 time-context 的语义对齐。同一变更不会注入两次（PRD §3.3 不变）。
 
-#### 5.5.3 turn 关闭边界抑制（新机制，C4 衍生）
+#### 5.5.3 turn 关闭边界抑制（M0-2 实测后修订）
 
-**问题**：turn 的最后，模型无工具调用收尾后，loop 会再做一次 pre-step 领取——批次为空即 `break` 关 turn。若此时向空批次追加漂移消息，会**强制多跑一次完整模型请求**（成本 + 可能诱发 agent 不必要的回应）。
+**实测修正（F10）**：turn 正常关闭**不会**产生尾部空批次 pre-step——无工具收尾的 step 结束后 loop 直接 `turn-stopping` → `break`（L564–571）。因此「注入导致关闭时多跑一次请求」在常规路径不成立；真正的风险路径只有两条罕见分支：
 
-**机制**：per-agent 维护 `toolsRanSinceLastStep` 标志（`tools/result` 置位，每次 pre-step 读取后清零）。抑制规则：
+| 空批次 pre-step 路径 | 源码 | 追加漂移消息的后果 |
+|---|---|---|
+| 工具循环延续步（`turnEnds` 未置位） | L531–537 常规迭代 | **无**——step 本来就要跑，注入免费搭车（E7 中途干预依赖此路径） |
+| turnEnds 已置位但批次领空（如 max-tokens 后无新转向） | L542 | 强制多跑一次完整模型请求 |
+| turn 首次领取为空（spurious wake / 消息被丢弃） | L543 | 强制一个本不存在的 step |
+
+**机制**（不变）：per-agent 维护 `toolsRanSinceLastStep` 标志（`tools/result` 置位，每次 pre-step 读取后清零）。抑制规则：
 
 | pre-step 场景 | 判定 | 行为 |
 |---|---|---|
 | 批次非空（用户发言/steering/inject 领取） | 正常 step | 注入 |
-| 批次空 **且** 本 turn 上一边界后有工具执行 | 工具循环的延续 step（step 本来就要跑） | 注入（T4/E7 中途干预场景依赖此路径） |
-| 批次空 **且** 无工具执行 | 疑似 turn 关闭检查 | **不注入**，漂移留队列；下一 turn 首个非空 pre-step 补投 |
+| 批次空 **且** 本 turn 上一边界后有工具执行 | 工具循环的延续 step（step 本来就要跑） | 注入（T4/E7 中途干预场景依赖此路径；M0-2 实测 step 85/86/104–106 均为此类空批次） |
+| 批次空 **且** 无工具执行 | L542/L543 关闭/空转路径 | **不注入**，漂移留队列；下一 turn 首个非空 pre-step 补投 |
 
-误抑制的代价有界：最坏情况是漂移延迟到下一 turn 才上报（turn-stopping 落盘保证不丢）。M0 验证项（§8.1）。
+误抑制的代价有界：最坏情况是漂移延迟到下一 turn 才上报（turn-stopping 落盘保证不丢）。M0-2 已实测：turn 3 正常关闭无任何尾部空批次 pre-step（L571 直断），抑制规则覆盖的正是仅剩的两条罕见分支。
 
 #### 5.5.4 已评估并放弃的通道
 
@@ -422,18 +429,18 @@ T1–T10 保留，修订与新增：
 
 ## 8. 里程碑（修订 PRD §4.8）
 
-### 8.1 M0 调研验证（第 1 周）——静态核实已完成，运行时验证已完成 5/6
+### 8.1 M0 调研验证（第 1 周）——✅ 静态核实 + 运行时验证全部完成（2026-08-30，探针 `probe-1` 已清理）
 
-本会话已完成的静态核实：§1.2 勘误表全部条目 + §3 事实基线（以 `.d.ts`、官方 README、agent-loop 源码为据）。**运行时实测结果**（2026-08-30，本会话内动态 Cordis 探针 `probe-1`）：
+本会话已完成的静态核实：§1.2 勘误表全部条目 + §3 事实基线（以 `.d.ts`、官方 README、agent-loop 源码为据）。**运行时实测结果**：
 
 1. ✅ pre-step `enter` 追加消息端到端可见：探针在 step 85（空批次延续步）追加 notice 消息，持久化为 `user/message` 并被模型在下一步引用（标记回读成功）。`{prepend: true}` + 先 `next()` 后追加的官方模式（time-context）实测有效。
-2. 🔶 §5.5.3 关闭边界：已实测确认「工具循环延续步批次为空」成立（step 85/86 均 `incoming:0, out:0`）；「turn 收尾的空批次 → break」尾部模式待本回合结束后复核 dump（观测探针 `pkg-3` 运行中）。
+2. ✅ §5.5.3 关闭边界：实测 turn 3 正常关闭**无尾部空批次 pre-step**（loop 在无工具 step 结束后 L571 直断）；工具延续步空批次成立（step 85/86/104–106 实测 `incoming:0`）。抑制规则保留，覆盖仅剩的 L542/L543 罕见分支（机制已按 F10 修订）。
 3. ✅ root ctx 未打标签监听者收到其他 agent 的 scope 事件：探针在 root 捕获到子代理（不同 sessionId）的 `agent/session-start` 与 `agent/pre-step`。注：本会话 subagent 后端两次首请求失败（对照实验证明与探针无关），属环境问题，不影响契约结论。
 4. ✅（负向确认）本 preset 未挂载 `run_code`，`tools/result` 只覆盖顶层调用；`tools/code-dispatch-log` 存在但无 Code Mode 可触发 → §5.2.2 的「子调用归 B 类兜底」为本 preset 下的唯一路径，设计不变。
 5. ✅ bundle patch 闭环：`dsh plugin --profile m0probe add <本地包>` 自动初始化 profile、manifest `dsh.profile.bundles` 增层、`--dump-config` 组合树出现 `# == bright-drift-m0-bundle-probe` 层横幅与 insert 行；`remove` 后行消失。insert 行语法以 `dsh-base/cordis.patch.yml` 为准（`- insert: [- id: …  name: …]`）。HMR 由 `watchUserPatches` 常驻（静态确认）。
 6. ✅ settings 命名空间：函数式 schema `settings.register('bright-drift-m0', fn)` 注册成功并解析默认值；外部编辑 `settings.yaml` 后 `settings/document-updated`（revision+1）与 `settings/updated`（`source:"provider"`，解析值正确）同步触发，实测热更新延迟 **~96ms**；Web 设置 UI 数据源 `settings.describe()` 依赖注册表（注册成功即入列）。
 
-**遗留复核项**：M0-2 的 turn 关闭尾部（空批次 pre-step → loop break）在下一回合 dump 确认后勾销。
+**M0 全部勾销；门禁解除，M2 可开始。**
 
 ### 8.2 后续里程碑
 
