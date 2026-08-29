@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+lib/
+*.tsbuildinfo
+
+# Test coverage
+coverage/
+
+# Logs
+*.log
+logs/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# Env & secrets (never commit)
+.env
+.env.*
+
+# pnpm
+pnpm-debug.log*
