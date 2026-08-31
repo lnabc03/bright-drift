@@ -1,0 +1,8 @@
+# T2 self-write echo test
+
+This file was written by the agent's own write tool. The baseline update
+happens at tools/result time, so the watcher echo that follows should be
+classified as E1 (self-write) and never reach the drift queue.
+
+If you (the human) edit this file externally, the next pre-step should
+inject an EXTERNAL·MODIFIED notice with a line-level diff.

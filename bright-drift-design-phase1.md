@@ -188,6 +188,11 @@ read/write/edit 工具每次操作都会对目标发出 `present(version)`/`abse
 
 约束：`fs/observed` 的监听器必须同步、不得 throw、返回 promise 不被 await（官方契约）——只往里放同步记录，重读等异步工作转交队列。
 
+**与 dsh 写守卫（`FS_STALE_VERSION`）的关系（2026-08-31 实测确认无冲突）**：dsh-fs-local 的 `writeText/editText` 实行乐观并发——写入时校验目标 version 是否等于 agent 最近一次观察（read/write）时的 version，不等则抛 `file changed since it was read`。两者是**正交的两层**：守卫是执行层的反应式硬阻断（不知道变了什么、谁改的），bright-drift 是信息层的主动告知（pre-step 注入 diff + 归因 + 「不是你做的」指令）。两条不变式保证互不干扰：
+1. bright-drift 的基线重读**必须直连 node fs**（core `probeFile`），**不得**经 dsh fs service 以 agent 身份重读——否则会刷新 agent 侧的观察 version，意外"洗白"真实过期、削弱守卫；
+2. bright-drift 只监听 `fs/observed`，从不写回 dsh 的观察状态。
+守卫在 bright-drift 就位后触发率应显著下降（agent 不再基于陈旧内容发起编辑），但**不能**移除：注入点到 edit 调用之间仍存在残余竞态窗口，守卫是最后保险。守卫报错后 agent 的正确动作（重读再改）与 drift notice 的指令（不要基于旧内容推理）方向一致。
+
 #### 5.2.4 自变更排除（PRD §3.4 不变）
 
 write/edit 成功 → AKB 立即更新为磁盘实际内容哈希 → watcher 回声事件对账一致 → 丢弃。精确内容级判定，无时间窗启发式。
