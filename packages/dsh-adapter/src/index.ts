@@ -1,5 +1,5 @@
 import { ContentStore } from 'bright-drift-core';
-import type { CtxLike, AgentLike, SettingsServiceLike, CommandsServiceLike, TimerServiceLike, FsServiceLike } from './types.js';
+import type { CtxLike, AgentLike, SettingsServiceLike, CommandsServiceLike, TimerServiceLike, FsServiceLike, SystemPromptLike } from './types.js';
 import { ConfigResolver, DEFAULT_CONFIG, settingsSchema } from './config.js';
 import { StateRegistry, type AgentState } from './state.js';
 import { WatchRegistry } from './watchers.js';
@@ -15,6 +15,7 @@ import { saveAgentState, loadAgentState, reconcileOnStart } from './persist.js';
 import { registerCommands } from './commands.js';
 import { Logger } from './log.js';
 import { blobsDir } from './paths.js';
+import { PROMPT_SECTION_NAME, PROMPT_SECTION_ORDER, PROMPT_SECTION_TEXT } from './prompt-section.js';
 
 /** Cordis plugin identity (bundle row id in cordis.patch.yml). */
 export const name = 'bright-drift';
@@ -48,6 +49,35 @@ export function apply(ctx: CtxLike): void {
   });
   const shellToolName: 'bash' | 'pwsh' = process.platform === 'win32' ? 'pwsh' : 'bash';
 
+  // ---- System-prompt section (§5.5.6): static notice-semantics legend ----
+  // Re-assembled before every model step, so it survives compaction/resume.
+  // Toggled live by the GLOBAL settings value only (project override N/A).
+  let systemPromptService: SystemPromptLike | undefined;
+  let promptSectionEnabled = DEFAULT_CONFIG.inject.promptSection;
+  let promptSectionOff: (() => void) | undefined;
+  const syncPromptSection = (): void => {
+    try {
+      if (promptSectionEnabled && systemPromptService && !promptSectionOff) {
+        promptSectionOff = systemPromptService.section({
+          name: PROMPT_SECTION_NAME,
+          order: PROMPT_SECTION_ORDER,
+          text: PROMPT_SECTION_TEXT,
+        });
+        logger.log('prompt-section.registered', {});
+      } else if (!promptSectionEnabled && promptSectionOff) {
+        promptSectionOff();
+        promptSectionOff = undefined;
+        logger.log('prompt-section.unregistered', {});
+      }
+    } catch (error) {
+      logger.error('prompt-section', error);
+    }
+  };
+  ctx.inject(['systemPrompt'], (injected) => {
+    systemPromptService = injected.get('systemPrompt') as SystemPromptLike;
+    syncPromptSection();
+  });
+
   // ---- Global settings namespace (D2 primary channel, F7) ----
   // Services may be provisioned asynchronously after our apply() runs
   // (observed live 2026-08-31: ctx.get('settings') was undefined at apply
@@ -57,8 +87,13 @@ export function apply(ctx: CtxLike): void {
     try {
       const settings = injected.get('settings') as SettingsServiceLike;
       const scope = settings.register('bright-drift', settingsSchema);
-      resolver.setGlobal(scope.get());
-      scope.watch((next: unknown) => resolver.setGlobal(next));
+      const applyResolved = (next: unknown): void => {
+        resolver.setGlobal(next);
+        promptSectionEnabled = resolver.globalConfig().inject.promptSection;
+        syncPromptSection();
+      };
+      applyResolved(scope.get());
+      scope.watch(applyResolved);
       logger.log('settings.registered', { ns: 'bright-drift' });
     } catch (error) {
       logger.error('settings.register', error);

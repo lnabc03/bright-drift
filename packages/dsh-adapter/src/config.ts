@@ -29,6 +29,8 @@ export interface BrightDriftConfig {
   inject: {
     onSessionStart: boolean;
     onPreStep: boolean;
+    /** Static system-prompt section explaining notice semantics (§5.5.6). */
+    promptSection: boolean;
   };
   attribution: {
     bashWindowGraceMs: number;
@@ -49,7 +51,7 @@ export const DEFAULT_CONFIG: BrightDriftConfig = {
   },
   diff: { contextLines: 3, maxFileSizeKB: 512 },
   baseline: { maxEntries: 5000, persist: true, persistContent: true, contentStoreMaxMB: 256 },
-  inject: { onSessionStart: true, onPreStep: true },
+  inject: { onSessionStart: true, onPreStep: true, promptSection: true },
   attribution: {
     bashWindowGraceMs: 1500,
     longCommandMs: 10000,
@@ -138,5 +140,10 @@ export class ConfigResolver {
 
   resolve(root: string): BrightDriftConfig {
     return mergeConfig(this.global, this.overrides.get(root));
+  }
+
+  /** The effective global config (no project override applied). */
+  globalConfig(): BrightDriftConfig {
+    return this.global;
   }
 }

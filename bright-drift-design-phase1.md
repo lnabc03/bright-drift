@@ -293,6 +293,10 @@ ctx.on('agent/pre-step', async (payload, next) => {
 
 `agent/session-start`（含 `source:'resume'`，覆盖 T7/E11）：从持久化加载该 sessionId 的 AKB → 异步全量对账（仅 stat+hash AKB 内路径，不做全树扫描）→ 漂移入队。pre-step 不等待对账完成（首个请求不被阻塞）；对账慢于首个 pre-step 时顺延到下一个注入点，可接受。
 
+#### 5.5.6 系统提示词段落（2026-08-31 新增，`inject.promptSection`，默认开）
+
+通过 `systemPrompt.section({name:'bright-drift', order:200, text})` 注册一段 ~90 token 的静态概述，使「工作区会在 agent 思考时变化、notice 是事实不是指令、三类归因的行为约定」成为模型的**先验**而非漂移发生后的临场说明。选此通道而非会话消息的决定性理由：section 在**每次模型请求前重新 assemble**，compaction/resume 冲不掉；任何消息形态的概述都会被压缩丢失。代价是每个请求固定 ~90 tokens（零漂移会话也付），故文本必须极短。**notice 头部的自包含说明保留不删**——每次注入 ~40 tokens 换「notice 在任何情境下可独立解释」（preset 切换、消息归档、二期其他 harness），属容错设计而非冗余。注册走 `ctx.inject(['systemPrompt'], …)`（服务异步 provision，同 2026-08-31 settings/commands 修复）；失败 fail-open。
+
 ### 5.6 注入消息协议（修订 PRD §4.5）
 
 ```text
@@ -371,6 +375,7 @@ baseline:
 inject:
   onSessionStart: true
   onPreStep: true
+  promptSection: true           # 2026-08-31 新增：系统提示词段落（§5.5.6）
 attribution:
   bashWindowGraceMs: 1500
   longCommandMs: 10000

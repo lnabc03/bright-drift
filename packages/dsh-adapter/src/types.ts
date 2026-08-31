@@ -113,3 +113,8 @@ export interface CommandsServiceLike {
 export interface TimerServiceLike {
   debounce<F extends (...args: never[]) => void>(callback: F, delay: number): F & { dispose(): void };
 }
+
+/** dsh-system-prompt section registry (design §5.5.6). */
+export interface SystemPromptLike {
+  section(section: { name: string; order: number; text: string }): () => void;
+}
