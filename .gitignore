@@ -28,3 +28,6 @@ Thumbs.db
 pnpm-debug.log*
 
 .e2e/
+
+# Per-project dsh plugin config/state (never commit)
+.dsh/

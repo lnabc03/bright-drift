@@ -6,6 +6,11 @@ The DeepSeek Harness plugin package. See the [repository root README](../../READ
 dsh plugin --profile web add bright-drift
 ```
 
+Installing from a local checkout instead (pre-publish)? See
+[Development install](../../README.md#development-install-local-checkout-pre-publish)
+in the repository root README — the `bright-drift-core` override step is
+required, or pnpm fails on the adapter's `workspace:*` dependency.
+
 Mounts as a host-plane bundle (`cordis.patch.yml` insert row). Host-only; no browser UI.
 
 - Commands: `/bright-drift status | diff <path> | pause | resume`

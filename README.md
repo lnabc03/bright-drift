@@ -37,6 +37,52 @@ dsh plugin --profile headless add bright-drift
 
 Requires dsh ≥ 0.1.1-rc.2. The plugin mounts as a host-plane bundle; restart the profile (or let the patch watcher remount) and it's live.
 
+### Development install (local checkout, pre-publish)
+
+The bare-name command above only works once the package is on npm. To install from a source checkout:
+
+**中文**：本地开发版安装步骤如下（发布 npm 前，裸包名安装不可用）。
+
+```bash
+# 1. Clone and build — both lib/ outputs and the repo's own node_modules
+#    must exist (the profile resolves the adapter's deps through a symlink
+#    back into this checkout).
+git clone https://github.com/lnabc03/bright-drift.git
+cd bright-drift
+pnpm install
+pnpm -r build
+```
+
+2. **Add the `bright-drift-core` override first.** The adapter declares `bright-drift-core: workspace:*`, which pnpm cannot resolve outside this repo — this is the step that fails without the override. Edit `~/.dsh/profiles/web/pnpm-workspace.yaml` (create the `overrides:` key if absent):
+
+```yaml
+overrides:
+  bright-drift-core: link:C:/absolute/path/to/bright-drift/packages/core
+```
+
+Use an absolute path with forward slashes. 中文：必须先加这个 override，否则下一步 pnpm 会因 `workspace:*` 协议解析失败。
+
+3. Install into the profile **from the repo root** (relative specs are anchored to your invoking directory):
+
+```bash
+dsh plugin --profile web add link:./packages/dsh-adapter
+```
+
+This symlinks the adapter into `~/.dsh/profiles/web/node_modules/` and — because the adapter's `package.json` declares `dsh.bundle.patch` — automatically appends `bright-drift` to `dsh.profile.bundles`. No manual edit of `cordis.yml` or `cordis.patch.yml` is needed. 中文：bundles 列表会自动登记，无需手改 cordis 配置。
+
+4. Restart the profile, then verify:
+
+```
+~/.dsh/logs/bright-drift/<date>.log   →   {"event":"plugin.applied", ...}
+```
+
+Notes / troubleshooting:
+
+- `link:` tracks the live checkout: after code edits, run `pnpm -r build` and restart the profile. Moving or deleting the checkout breaks the profile — uninstall first if you plan to.
+- Windows: pnpm creates symlinks for `link:` deps; enable Developer Mode or run from an elevated shell if you hit `EPERM`.
+- Uninstall: `dsh plugin --profile web remove bright-drift` (the bundles entry is removed automatically).
+- If pnpm still errors on `workspace:*`, the override in step 2 is missing, misplaced (it goes in the **profile's** `pnpm-workspace.yaml`, not the repo's), or not an absolute path.
+
 ## Usage
 
 Nothing to configure by default. Once installed:
