@@ -6,9 +6,11 @@ bright-drift is an agent plugin: it continuously watches the workspace, identifi
 
 ## The problem
 
-While your agent reasons, edits files, and runs commands, the workspace keeps moving: you fix a typo by hand, delete or rename a file, a formatter rewrites a file, a background `npm run build` regenerates outputs, a git operation swaps branches. The agent doesn't see any of it — it acts on a stale mental model, re-reads files defensively, or worse, overwrites your manual fix.
+Co-editing the workspace with an agent is a common scenario: while the agent reasons, edits files, and runs commands, you're touching the same files too — deleting or renaming a file, changing a function name in a debug script, fixing a typo by hand (not to mention formatter passes, build outputs, and branch switches). But the agent is largely blind to these external moves.
 
-bright-drift closes that gap. It watches the workspace, keeps a per-session baseline of what the agent has seen (the *Agent Knowledge Base*), and injects a compact, budgeted drift notice right before the next model request:
+So when it finally bumps into a change that never made it into its context, it's caught off guard: it may revert a commit just to "restore" the file you deleted on purpose, or keep marching down the now-stale context until it's hard-blocked by that function you renamed. Avoiding these traps would mean telling it everything, step by step — which is exactly the burden on the user.
+
+bright-drift removes that friction from human-agent co-editing. It watches the workspace, keeps a per-session baseline of what the agent has seen (the *Agent Knowledge Base*), and injects a compact, budgeted drift notice right before the next model request — letting the plugin report what happened instead of you having to spell it out:
 
 ```
 COMMAND-SIDE-EFFECT  你的命令 `npm run codegen` 改动了 1 个文件：
