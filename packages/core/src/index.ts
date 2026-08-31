@@ -20,6 +20,8 @@ export { createIgnoreMatcher, BUILTIN_IGNORE } from './watcher/ignore.js';
 
 // drift
 export { reconcile, mergeRenames } from './drift/reconcile.js';
+export { revalidateRecords } from './drift/revalidate.js';
+export type { RevalidateResult, RevalidateDrop, RevalidateDropReason } from './drift/revalidate.js';
 export { DriftQueue } from './drift/queue.js';
 export { probeFile, toRelativeKey } from './drift/probe.js';
 export type { DriftKind, DriftRecord, FileObservation } from './drift/types.js';

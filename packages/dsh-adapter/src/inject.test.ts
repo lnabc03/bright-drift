@@ -161,4 +161,28 @@ describe('buildInjection end-to-end (FR-2/FR-3/FR-4 core loop)', () => {
     const message = await buildInjection(state, DEFAULT_CONFIG, deps());
     expect(message!.content[0]!.text).toContain('FORMATTED  fmt.ts');
   });
+
+  it('E19: create→rename→edit→rename collapses to a single created record', async () => {
+    // Explorer flow (reported live 2026-08-31): create draft.txt, rename to
+    // mid.txt, edit, rename to final.yml. The intermediate paths were never
+    // AKB-tracked, so their unlinks reconcile to nothing — without E19 the
+    // queue would render three phantom `created` lines.
+    const feed = (events: { path: string; kind: 'add' | 'change' | 'unlink' }[]) =>
+      handleWatchBatch(ws, events, registry.statesForRoot(ws), { resolver, logger });
+
+    await fs.writeFile(path.join(ws, 'draft.txt'), 'draft\n');
+    await feed([{ path: 'draft.txt', kind: 'add' }]);
+    await fs.rename(path.join(ws, 'draft.txt'), path.join(ws, 'mid.txt'));
+    await feed([{ path: 'draft.txt', kind: 'unlink' }, { path: 'mid.txt', kind: 'add' }]);
+    await fs.writeFile(path.join(ws, 'mid.txt'), 'budget: {maxInjectTokens: 200}\n');
+    await fs.rename(path.join(ws, 'mid.txt'), path.join(ws, 'final.yml'));
+    await feed([{ path: 'mid.txt', kind: 'unlink' }, { path: 'final.yml', kind: 'add' }]);
+
+    const message = await buildInjection(state, DEFAULT_CONFIG, deps());
+    const text = message!.content[0]!.text;
+    expect(text).toContain('final.yml');
+    expect(text).not.toContain('draft.txt');
+    expect(text).not.toContain('mid.txt');
+    expect(state.queue.isEmpty()).toBe(true); // dropped phantoms retired too
+  });
 });

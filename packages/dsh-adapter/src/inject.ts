@@ -5,6 +5,7 @@ import {
   isCosmeticDiff,
   probeFile,
   renderInjection,
+  revalidateRecords,
   shouldInjectAtPreStep,
   withinFormatterWindow,
   type RenderEntry,
@@ -48,8 +49,28 @@ export async function buildInjection(
   config: BrightDriftConfig,
   deps: InjectDeps,
 ): Promise<PluginUserMessage | null> {
-  const records = state.queue.peek() as AttributedDrift[];
-  if (records.length === 0) return null;
+  const peeked = state.queue.peek() as AttributedDrift[];
+  if (peeked.length === 0) return null;
+
+  // E19: re-validate queued records against live disk before rendering —
+  // drops phantom creates (create→rename before injection), net-zero
+  // modifications, and recreated-identical deletions. Dropped records
+  // retire together with the rendered ones at the Sync Point below.
+  const { keep: records, dropped } = await revalidateRecords(
+    peeked,
+    (p) => probeFile(state.workspaceRoot, p, { maxFileSizeKB: config.diff.maxFileSizeKB }),
+    state.akb,
+  );
+  if (dropped.length > 0) {
+    deps.logger.log('inject.revalidated', {
+      sessionId: state.sessionId,
+      dropped: dropped.map((d) => ({ path: d.record.path, reason: d.reason })),
+    });
+  }
+  if (records.length === 0) {
+    state.queue.commitRendered(peeked);
+    return null; // everything pending was phantom/net-zero — retire silently
+  }
 
   const entries: RenderEntry[] = [];
   const freshContent = new Map<string, Buffer>();
@@ -148,7 +169,7 @@ export async function buildInjection(
       deps.logger.error('sync-point.entry', error, { sessionId: state.sessionId, path: record.path });
     }
   }
-  state.queue.commitRendered(records);
+  state.queue.commitRendered(peeked); // retire rendered + dropped (E19) together
   state.stats.injections += 1;
   state.stats.tokensInjected += estimateTokens(rendered.text);
   deps.logger.log('inject.rendered', {

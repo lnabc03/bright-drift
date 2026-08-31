@@ -413,6 +413,9 @@ E1–E15 全部保留，修订/新增如下：
 | E16（新） | turn 关闭边界存在待注入漂移 | 不注入、不多跑请求；turn-stopping 落盘，下一 turn 首个 pre-step 补投（§5.5.3） |
 | E17（新） | Code Mode（run_code）子调用写文件 | 顶层 tools/result 不含子调用写盘细节 → watcher + FR-7 窗口归 B 类兜底（§5.2.2） |
 | E18（新） | content-store blob 被 LRU 淘汰 | 该文件 modified 漂移降级文件级 + `+a/-b` 统计（语义同 E8） |
+| E19（新） | 队列记录与磁盘现状脱节（幻影创建/净零修改/删后重建） | 渲染前对队列做**再验证**（revalidate）：逐条 re-probe。created 目标已不存在 → 丢弃（phantom-create，典型场景：资源管理器新建 txt→改名→编辑→再改名，旧路径从未入 AKB，E5 跨批次无法合并）；modified 重探哈希已回到基线 → 丢弃（净零）；deleted 目标已重建 → 哈希同基线丢弃（E4 语义），不同则改判 modified；renamed 目标已不存在 → fromPath 有基线则改判 deleted，否则丢弃。再验证只修正 kind/刷新哈希，**归因沿用入队时的分类**（窗口语义属于事件发生时刻）。probe 失败 fail-open 保留原记录。被丢弃的记录随本次成功渲染一并退休（commitRendered 覆盖 rendered+dropped），不残留队列。 |
+
+**§5.5.2 Sync Point 补充**：Sync Point 的完整顺序为 `peek → revalidate（E19）→ render → 成功后才 commitRendered + AKB rebase`。revalidate 的探测 IO 以队列长度为界（渲染上限 50 文件/次，超出部分留在队列等下一注入点自然再验证）。
 
 ---
 
