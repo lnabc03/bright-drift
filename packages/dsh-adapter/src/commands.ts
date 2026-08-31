@@ -72,6 +72,10 @@ export function registerCommands(commands: CommandsServiceLike, deps: CommandDep
   return commands.register({
     name: 'bright-drift',
     description: 'workspace drift awareness: status / diff <path> / pause / resume',
+    // Without an input descriptor the composer only admits the bare
+    // command and treats trailing text as a plain message (verified
+    // against dsh-commands built-ins: /permission, /feedback, /plan).
+    input: { hint: '[status|diff <path>|pause|resume]' },
     handler: async (invocation): Promise<CommandResult> => {
       const agent: AgentLike = invocation.agent;
       const state = deps.registry.get(agent);

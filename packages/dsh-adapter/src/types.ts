@@ -101,6 +101,8 @@ export interface CommandsServiceLike {
   register(definition: {
     name: string;
     description: string;
+    /** Declares that the command accepts trailing arguments (dsh composer admission). */
+    input?: { hint: string };
     handler: (invocation: { agent: AgentLike; rawInput: string }) =>
       | { kind: 'success'; text?: string }
       | { kind: 'error'; text: string }
