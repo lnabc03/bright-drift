@@ -80,6 +80,12 @@ export interface CtxLike {
   on(name: string, listener: (...args: never[]) => unknown, options?: { prepend?: boolean }): () => void;
   /** Register a fiber-owned effect; the returned disposer runs on plugin dispose. */
   effect(callback: () => (() => void) | void, label?: string): unknown;
+  /**
+   * Run callback in a child context once all named services are available
+   * (Cordis Context.inject). Services can be provisioned asynchronously
+   * after our apply() runs, so late-but-optional capabilities go here.
+   */
+  inject(deps: string[], callback: (ctx: CtxLike) => void): unknown;
 }
 
 export interface SettingsScopeLike<T> {

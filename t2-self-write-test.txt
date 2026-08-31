@@ -6,3 +6,5 @@ classified as E1 (self-write) and never reach the drift queue.
 
 If you (the human) edit this file externally, the next pre-step should
 inject an EXTERNAL·MODIFIED notice with a line-level diff.
+
+我新增了一行：现在正在进行T5、T6测试。

@@ -49,9 +49,13 @@ export function apply(ctx: CtxLike): void {
   const shellToolName: 'bash' | 'pwsh' = process.platform === 'win32' ? 'pwsh' : 'bash';
 
   // ---- Global settings namespace (D2 primary channel, F7) ----
-  const settings = ctx.get('settings') as SettingsServiceLike | undefined;
-  if (settings) {
+  // Services may be provisioned asynchronously after our apply() runs
+  // (observed live 2026-08-31: ctx.get('settings') was undefined at apply
+  // time in the web profile), so registration waits via ctx.inject — the
+  // watcher/session machinery below starts immediately regardless.
+  ctx.inject(['settings'], (injected) => {
     try {
+      const settings = injected.get('settings') as SettingsServiceLike;
       const scope = settings.register('bright-drift', settingsSchema);
       resolver.setGlobal(scope.get());
       scope.watch((next: unknown) => resolver.setGlobal(next));
@@ -59,7 +63,7 @@ export function apply(ctx: CtxLike): void {
     } catch (error) {
       logger.error('settings.register', error);
     }
-  }
+  });
 
   const observeDeps = {
     registry,
@@ -69,6 +73,10 @@ export function apply(ctx: CtxLike): void {
     shellToolName,
     fsService: ctx.get('fs') as FsServiceLike | undefined,
   };
+  // fs may also arrive late; the listener reads deps.fsService per event.
+  ctx.inject(['fs'], (injected) => {
+    observeDeps.fsService = injected.get('fs') as FsServiceLike;
+  });
   const injectDeps = { registry, resolver, contentStore, logger };
 
   const rootFor = (agent: AgentLike): string => {
@@ -142,15 +150,16 @@ export function apply(ctx: CtxLike): void {
   // ---- Injection channel (§5.5, single path, single Sync Point) ----
   ctx.on('agent/pre-step', makePreStepListener(injectDeps) as never, { prepend: true });
 
-  // ---- Commands (§5.10) ----
-  const commands = ctx.get('commands') as CommandsServiceLike | undefined;
-  if (commands) {
+  // ---- Commands (§5.10) — same async-provisioning reasoning as settings ----
+  ctx.inject(['commands'], (injected) => {
     try {
+      const commands = injected.get('commands') as CommandsServiceLike;
       registerCommands(commands, { registry, resolver, watchers, contentStore, logger });
+      logger.log('commands.registered', { names: ['bright-drift'] });
     } catch (error) {
       logger.error('commands.register', error);
     }
-  }
+  });
 
   logger.log('plugin.applied', { shellToolName });
 
