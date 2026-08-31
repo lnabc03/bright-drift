@@ -6,7 +6,7 @@ bright-drift is an agent plugin: it continuously watches the workspace, identifi
 
 ## The problem
 
-While your agent reasons, edits files, and runs commands, the workspace keeps moving: you fix a typo by hand, a formatter rewrites a file, a background `npm run build` regenerates outputs, a git operation swaps branches. The agent doesn't see any of it — it acts on a stale mental model, re-reads files defensively, or worse, overwrites your manual fix.
+While your agent reasons, edits files, and runs commands, the workspace keeps moving: you fix a typo by hand, delete or rename a file, a formatter rewrites a file, a background `npm run build` regenerates outputs, a git operation swaps branches. The agent doesn't see any of it — it acts on a stale mental model, re-reads files defensively, or worse, overwrites your manual fix.
 
 bright-drift closes that gap. It watches the workspace, keeps a per-session baseline of what the agent has seen (the *Agent Knowledge Base*), and injects a compact, budgeted drift notice right before the next model request:
 
@@ -37,9 +37,9 @@ dsh plugin --profile headless add bright-drift
 
 Requires dsh ≥ 0.1.1-rc.2. The plugin mounts as a host-plane bundle; restart the profile (or let the patch watcher remount) and it's live.
 
-### Development install (local checkout, pre-publish)
+### Development install
 
-The bare-name command above only works once the package is on npm. To install from a source checkout:
+To install from a source checkout:
 
 ```bash
 # 1. Clone and build — both lib/ outputs and the repo's own node_modules

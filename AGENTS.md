@@ -82,6 +82,6 @@ docs/              # PRD、设计文档（当前在仓库根，M1 时迁入）
 
 ## 7. 写作与文档语言
 
-- 用户-facing 文档（README、官网文案）：英文为主，中文对照。
+- 用户-facing 文档：根 README 中文为主（`README.md`），英文版存 `README_en.md`；子包 README（npm 页面展示）英文即可。
 - 设计文档、PRD、内部讨论：中文。
 - 代码注释：英文；commit message：英文。

@@ -6,7 +6,7 @@ bright-drift 是一个 agent 插件：持续监控工作区，识别用户/外�
 
 ## 要解决的问题
 
-当你的 agent 在推理、改文件、跑命令时，工作区其实一直在变化：你手动改了个拼写、格式化工具重写了某个文件、后台 `npm run build` 重新生成了产物、git 操作切换了分支。agent 对这些一无所知——它带着过时的认知继续工作，要么反复重读文件做防御，要么更糟，直接覆盖掉你的手动修改。
+当你的 agent 在推理、改文件、跑命令时，工作区其实一直在变化：你手动改了个拼写、删除或重命名了某个文件，格式化工具重写了某个文件、后台 `npm run build` 重新生成了产物、git 操作切换了分支。agent 对这些一无所知——它带着过时的认知继续工作，要么反复重读文件做防御，要么更糟，直接覆盖掉你的手动修改。
 
 bright-drift 补齐了这个缺口。它监控工作区，为每个会话维护一份「agent 已经见过什么」的基线（*Agent Knowledge Base*，AKB），并在下一次模型请求前注入一条紧凑、受预算约束的漂移通知：
 
@@ -37,9 +37,9 @@ dsh plugin --profile headless add bright-drift
 
 需要 dsh ≥ 0.1.1-rc.2。插件以 host-plane bundle 形态挂载；重启 profile（或让 patch watcher 自动重挂载）后即生效。
 
-### 本地开发安装（源码 checkout，发布 npm 前）
+### 本地开发安装
 
-上面的裸包名命令只有在包已发布到 npm 后才可用。要从源码 checkout 安装：
+要从源码 checkout 安装：
 
 ```bash
 # 1. 克隆并构建——lib/ 产物和仓库自身的 node_modules 都必须存在
