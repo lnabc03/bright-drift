@@ -14,6 +14,7 @@ import {
   wsHash,
 } from '../shared/paths.js';
 import { SCHEMA_VERSION, type PendingInjection, type WorkspaceInfo } from '../shared/schema.js';
+import { removeSession, touchSession } from '../shared/session.js';
 
 /**
  * Daemon lifecycle tests (design §5.2, P2-T5): real bundled daemon processes
@@ -49,11 +50,11 @@ afterEach(async () => {
   await fs.rm(cwd, { recursive: true, force: true });
 });
 
-async function spawnDaemonDirect(): Promise<ChildProcess> {
+async function spawnDaemonDirect(extraEnv: NodeJS.ProcessEnv = {}): Promise<ChildProcess> {
   const child = spawn(
     process.execPath,
     [path.join(libDir(), 'daemon', 'main.js'), '--hash', hash, '--workspace', cwd],
-    { env: { ...process.env, ...FAST }, stdio: 'ignore' },
+    { env: { ...process.env, ...FAST, ...extraEnv }, stdio: 'ignore' },
   );
   // The daemon only owns the workspace once workspace.json names its pid.
   await atomicWriteFile(
@@ -69,26 +70,57 @@ async function spawnDaemonDirect(): Promise<ChildProcess> {
 }
 
 describe('daemon lifecycle', () => {
-  it('consumes register, writes hello-drift pending, tracks liveness', async () => {
-    daemon = await spawnDaemonDirect();
+  it('register → observe → external modify → pending injection (P2-T1)', async () => {
+    // Long liveness budgets: this test spans seconds, and the hooks' liveness
+    // refresh (touchSession) is simulated once — in production every hook call
+    // re-touches the session file.
+    daemon = await spawnDaemonDirect({
+      BRIGHT_DRIFT_SESSION_DEAD_MS: '60000',
+      BRIGHT_DRIFT_IDLE_EXIT_MS: '60000',
+    });
     await postMailbox(hash, 's1', {
       type: 'session.register',
       sessionId: 's1',
       cwd,
       source: 'startup',
     });
+    await touchSession(hash, 's1', 'startup'); // the session-start hook's half
 
+    // A fresh session with an empty AKB has nothing to say.
+    await new Promise((r) => setTimeout(r, 500));
+    expect(await readJsonFile(pendingFile(hash, 's1'))).toBeUndefined();
+
+    // The agent reads the file (baseline), then an external process edits it.
+    const file = path.join(cwd, 'a.txt');
+    await fs.writeFile(file, 'v1\n');
+    await postMailbox(hash, 's1', {
+      type: 'akb.observe',
+      sessionId: 's1',
+      tool: 'Read',
+      filePath: file,
+      action: 'read',
+    });
+    await waitFor(async () =>
+      (await readJsonFile<string[]>(path.join(stateHome, 'workspaces', hash, 'akb-paths.json')))?.includes(file) === true,
+    );
+
+    await fs.writeFile(file, 'v2 external\n');
     const got = await waitFor(async () => {
       const p = await readJsonFile<PendingInjection>(pendingFile(hash, 's1'));
-      return p?.text.includes('BRIGHT-DRIFT-HELLO') === true;
-    });
+      return p?.text.includes('EXTERNAL') === true && p.text.includes('a.txt');
+    }, 15_000);
     expect(got).toBe(true);
-    expect(await readJsonFile(sessionFile(hash, 's1'))).toMatchObject({ sessionId: 's1' });
 
-    // deregister removes the session entry
+    // deregister: the SessionEnd hook removes the session entry itself and
+    // posts the mailbox message; an undelivered pending batch SURVIVES — the
+    // sync point committed the AKB at render time, so deleting it would lose
+    // the drift notice entirely (e2e P2-T3, 2026-09-02).
+    await removeSession(hash, 's1');
     await postMailbox(hash, 's1', { type: 'session.deregister', sessionId: 's1' });
     expect(await waitFor(async () => !(await readJsonFile(sessionFile(hash, 's1'))))).toBe(true);
-  }, 15_000);
+    // pending stays deliverable for a later resume
+    expect((await readJsonFile<PendingInjection>(pendingFile(hash, 's1')))?.text).toContain('a.txt');
+  }, 25_000);
 
   it('exits when idle and removes workspace.json (P2-D4)', async () => {
     daemon = await spawnDaemonDirect();
@@ -111,6 +143,24 @@ describe('daemon lifecycle', () => {
       }),
     );
     expect(await waitFor(async () => !(await readJsonFile(sessionFile(hash, 'stale'))))).toBe(true);
+  }, 15_000);
+
+  it('exits when workspace.json names another pid (stale duplicate sweep)', async () => {
+    daemon = await spawnDaemonDirect();
+    const pid = daemon.pid!;
+    // A newer daemon takes over the workspace — the stale one must notice
+    // within one sweep and exit (two daemons once raced over one workspace
+    // when a state-dir reset stranded the old owner; e2e 2026-09-02).
+    await atomicWriteFile(
+      workspaceFile(hash),
+      JSON.stringify({
+        version: SCHEMA_VERSION,
+        root: cwd,
+        daemonPid: pid + 999999,
+        daemonStartedAt: Date.now(),
+      } satisfies WorkspaceInfo),
+    );
+    expect(await waitFor(() => !pidAlive(pid), 10_000)).toBe(true);
   }, 15_000);
 
   it('ensureDaemon is idempotent: two launches, one daemon (P2-T5)', async () => {

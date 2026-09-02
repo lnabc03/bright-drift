@@ -1,4 +1,6 @@
 import { promises as fs } from 'node:fs';
+import * as path from 'node:path';
+import { analyzeCommand, toRelativeKey } from 'bright-drift-core';
 import { hookContext, runHook } from '../shared/hook-io.js';
 import { readJsonFile } from '../shared/atomic.js';
 import { postMailbox } from '../shared/mailbox.js';
@@ -11,10 +13,8 @@ import { touchSession } from '../shared/session.js';
  * pre-snapshot is taken HERE, in the hook process, because the mailbox is
  * async — by the time the daemon saw window.open the command may already
  * have written files. Cost is bounded: stat() over the daemon-maintained
- * AKB path list (a few hundred entries, <50ms against a 600s timeout).
- *
- * M5 will add the command static analysis (predictedPaths) via an esbuild
- * bundle that inlines core's analyzeBash/analyzePwsh.
+ * AKB path list (a few hundred entries, <50ms against a 600s timeout) plus
+ * core's static command analysis (inlined into this bundle by esbuild).
  */
 async function main(input: Record<string, unknown>): Promise<void> {
   const ctx = hookContext(input);
@@ -27,6 +27,14 @@ async function main(input: Record<string, unknown>): Promise<void> {
   const hash = await wsHash(ctx.cwd);
 
   await touchSession(hash, ctx.sessionId);
+
+  // Static analysis (FR-7/D8): predicted write targets, normalized to
+  // workspace-relative POSIX keys (absolute paths anchored at cwd).
+  const predictedPaths = analyzeCommand('bash', command)
+    .map((p) =>
+      path.isAbsolute(p) ? toRelativeKey(ctx.cwd, p) : p.split(path.sep).join('/'),
+    )
+    .filter((p): p is string => p !== null);
 
   const paths = (await readJsonFile<string[]>(akbPathsFile(hash))) ?? [];
   const preSnapshot: WindowPreSnapshotEntry[] = await Promise.all(
@@ -49,6 +57,7 @@ async function main(input: Record<string, unknown>): Promise<void> {
     ...(background ? { background } : {}),
     openedAt: Date.now(),
     preSnapshot,
+    predictedPaths,
   });
 }
 

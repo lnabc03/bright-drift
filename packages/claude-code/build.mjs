@@ -16,6 +16,11 @@ const hookEntries = [
   'session-end',
 ];
 
+// CJS deps (yaml) use dynamic require, which an ESM bundle lacks — shim it.
+const REQUIRE_SHIM =
+  "import { createRequire as __bdCreateRequire } from 'node:module';" +
+  'const require = __bdCreateRequire(import.meta.url);';
+
 /** @type {esbuild.BuildOptions} */
 const base = {
   bundle: true,
@@ -25,6 +30,7 @@ const base = {
   sourcemap: false,
   minify: false,
   logLevel: 'warning',
+  banner: { js: REQUIRE_SHIM },
 };
 
 await Promise.all([
@@ -44,7 +50,7 @@ await Promise.all([
     ...base,
     entryPoints: [path.join(root, 'src', 'cli.ts')],
     outfile: path.join(root, 'lib', 'cli.js'),
-    banner: { js: '#!/usr/bin/env node' },
+    banner: { js: `#!/usr/bin/env node\n${REQUIRE_SHIM}` },
   }),
 ]);
 

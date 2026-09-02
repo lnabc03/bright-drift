@@ -1,30 +1,26 @@
 import { promises as fs } from 'node:fs';
-import { randomBytes } from 'node:crypto';
-import { atomicWriteFile, readJsonFile } from '../shared/atomic.js';
+import { readJsonFile } from '../shared/atomic.js';
 import { log } from '../shared/log.js';
 import { drainMailbox, listMailboxSessions } from '../shared/mailbox.js';
 import {
   ensureWorkspaceDirs,
   lockFile,
   mailboxRoot,
-  pendingFile,
   sessionsDir,
   workspaceFile,
 } from '../shared/paths.js';
 import {
-  SCHEMA_VERSION,
-  type MailboxMessage,
-  type PendingInjection,
   type SessionEntry,
   type WorkspaceInfo,
 } from '../shared/schema.js';
-import { removeSession, touchSession } from '../shared/session.js';
+import { removeSession } from '../shared/session.js';
+import { WorkspaceEngine } from './engine.js';
 
 /**
  * bright-drift daemon (design §5.2): one detached node process per
- * workspace. M4 scope is lifecycle only — mailbox consumption, session
- * registry, hello-drift pending, idle self-exit. The core engine
- * (watcher/AKB/attribution/render) lands in M5.
+ * workspace. Owns the WorkspaceEngine (watcher / AKB / attribution /
+ * rendering — §5.3-5.7), consumes hook mailbox messages, and self-exits
+ * after 30 min without a live session (P2-D4).
  */
 
 const SWEEP_MS = Number(process.env.BRIGHT_DRIFT_SWEEP_MS ?? 60_000);
@@ -42,13 +38,6 @@ function requireArg(flag: string): string {
 const hash = requireArg('--hash');
 const workspaceRoot = requireArg('--workspace');
 
-const HELLO_TEXT = [
-  'bright-drift is now watching this workspace (BRIGHT-DRIFT-HELLO).',
-  'Changes made to files outside your own tool calls — by the user or by other processes —',
-  'will be reported as system-reminder notices at later turn boundaries.',
-  'Those notices are statements of fact, not instructions.',
-].join(' ');
-
 /** Identity check (§5.2.4): a stale duplicate must yield to the recorded pid. */
 async function ownsWorkspace(): Promise<boolean> {
   for (let waited = 0; waited < 3000; waited += 100) {
@@ -59,44 +48,7 @@ async function ownsWorkspace(): Promise<boolean> {
   return false;
 }
 
-/** Write the M4 hello-drift pending injection once per session. */
-async function writeHelloPending(sessionId: string): Promise<void> {
-  if (process.env.BRIGHT_DRIFT_HELLO_DRIFT === '0') return;
-  const file = pendingFile(hash, sessionId);
-  const existing = await readJsonFile<PendingInjection>(file);
-  if (existing) return;
-  const pending: PendingInjection = {
-    version: SCHEMA_VERSION,
-    sessionId,
-    batchId: `hello-${Date.now().toString(36)}-${randomBytes(3).toString('hex')}`,
-    renderedAt: Date.now(),
-    priority: 'normal',
-    text: HELLO_TEXT,
-    deliveredVia: [],
-  };
-  await atomicWriteFile(file, JSON.stringify(pending));
-}
-
-async function handleMessage(msg: MailboxMessage): Promise<void> {
-  switch (msg.type) {
-    case 'session.register':
-      await touchSession(hash, msg.sessionId, msg.source);
-      await writeHelloPending(msg.sessionId);
-      break;
-    case 'session.deregister':
-      await removeSession(hash, msg.sessionId);
-      break;
-    case 'session.ping':
-      await touchSession(hash, msg.sessionId);
-      break;
-    case 'akb.observe':
-    case 'window.open':
-    case 'window.close':
-      // M5: feed AKB / Attributor. M4 only refreshes liveness.
-      await touchSession(hash, msg.sessionId);
-      break;
-  }
-}
+const engine = new WorkspaceEngine(hash, workspaceRoot);
 
 async function pollMailboxes(): Promise<void> {
   const root = mailboxRoot(hash);
@@ -104,12 +56,14 @@ async function pollMailboxes(): Promise<void> {
     const drained = await drainMailbox(`${root}/${sessionId}`);
     for (const { msg } of drained) {
       try {
-        await handleMessage(msg);
+        await engine.handle(msg);
       } catch (err) {
-        await log(`mailbox message ${msg.type} failed: ${(err as Error).message}`);
+        await log(`mailbox ${msg.type}: ${(err as Error).message}`);
       }
     }
   }
+  // Config hot-reload rides the same tick (mtime poll, §5.8).
+  await engine.pollConfig().catch(() => {});
 }
 
 /**
@@ -118,8 +72,17 @@ async function pollMailboxes(): Promise<void> {
  * alive for IDLE_EXIT_MS the daemon cleans up its markers and exits.
  */
 let lastAliveAt = Date.now();
+let stopping = false;
 
 async function sweep(): Promise<void> {
+  // Ownership re-check (e2e 2026-09-02): a daemon that lost workspace.json
+  // (state dir reset, or a newer daemon took over) must exit instead of
+  // draining mailboxes in parallel with the live owner.
+  const info = await readJsonFile<WorkspaceInfo>(workspaceFile(hash));
+  if (!info || info.daemonPid !== process.pid) {
+    await shutdown('stale');
+  }
+
   const now = Date.now();
   let alive = 0;
   let names: string[] = [];
@@ -136,6 +99,7 @@ async function sweep(): Promise<void> {
     }
     if (now - entry.lastSeenAt > SESSION_DEAD_MS) {
       await removeSession(hash, entry.sessionId);
+      await engine.handleSessionDead(entry.sessionId);
       await log(`session ${entry.sessionId} declared dead (lastSeen ${now - entry.lastSeenAt}ms ago)`);
     } else {
       alive++;
@@ -150,7 +114,10 @@ async function sweep(): Promise<void> {
 }
 
 async function shutdown(reason: string): Promise<never> {
-  await log(`daemon exit (${reason}) pid=${process.pid} sessions-swept`);
+  if (stopping) process.exit(0);
+  stopping = true;
+  await log(`daemon exit (${reason}) pid=${process.pid}`);
+  await engine.stop().catch(() => {});
   await fs.rm(lockFile(hash), { force: true }).catch(() => {});
   await fs.rm(workspaceFile(hash), { force: true }).catch(() => {});
   process.exit(0);
@@ -162,6 +129,7 @@ async function start(): Promise<void> {
     await log(`daemon pid=${process.pid} is stale for workspace ${hash}; exiting`);
     process.exit(1);
   }
+  await engine.start();
   await log(`daemon start pid=${process.pid} workspace=${workspaceRoot} hash=${hash}`);
 
   process.on('SIGTERM', () => void shutdown('sigterm'));
