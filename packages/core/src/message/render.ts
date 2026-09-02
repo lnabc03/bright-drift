@@ -40,6 +40,11 @@ function statSuffix(diff: FileDiff | null | undefined): string {
   return `  (+${diff.added} -${diff.removed})`;
 }
 
+/** Patch text with an explicit omission marker when truncated (FR-4.2). */
+function patchText(diff: FileDiff): string {
+  return diff.truncated ? `${diff.patch}\n… [省略 ${diff.omittedLines} 行]` : diff.patch;
+}
+
 /** Render drift entries into the §5.6 protocol message + notice summary. */
 export function renderInjection(entries: RenderEntry[], options: RenderOptions = {}): RenderedInjection {
   const visible = options.formatterSilent
@@ -86,7 +91,7 @@ export function renderInjection(entries: RenderEntry[], options: RenderOptions =
       const lines = sideEffects.get(key) ?? [];
       lines.push(
         mode === 'diff' && diff
-          ? `${record.path} (+${diff.added} -${diff.removed})\n${diff.patch}`
+          ? `${record.path} (+${diff.added} -${diff.removed})\n${patchText(diff)}`
           : `${record.path}${suffix}`,
       );
       sideEffects.set(key, lines);
@@ -95,7 +100,7 @@ export function renderInjection(entries: RenderEntry[], options: RenderOptions =
 
     if (attribution.confidence === 'ambiguous-external') {
       const lines = [`EXTERNAL·${kindLabel} (ambiguous-external)  ${record.path}${suffix}`];
-      if (mode === 'diff' && diff) lines.push(diff.patch);
+      if (mode === 'diff' && diff) lines.push(patchText(diff));
       const bg = attribution.background ? '（后台任务）' : '';
       lines.push(
         `  发生于你的命令 \`${attribution.command ?? '?'}\` ${bg}执行期间，可能由该命令产生，也可能是外部修改`,
@@ -108,7 +113,7 @@ export function renderInjection(entries: RenderEntry[], options: RenderOptions =
     // External, high confidence.
     if (record.kind === 'modified' && mode === 'diff' && diff) {
       externalModified.push(
-        `EXTERNAL·MODIFIED (high confidence)  ${record.path}${suffix}\n${diff.patch}`,
+        `EXTERNAL·MODIFIED (high confidence)  ${record.path}${suffix}\n${patchText(diff)}`,
       );
       return;
     }
@@ -158,8 +163,10 @@ export function buildSummary(entries: RenderEntry[]): string {
   let external = 0;
   let sideEffect = 0;
   let ambiguous = 0;
+  let formatted = 0;
   for (const e of entries) {
     if (e.attribution.category === 'B') sideEffect += 1;
+    else if (e.attribution.category === 'D') formatted += 1;
     else if ('confidence' in e.attribution && e.attribution.confidence === 'ambiguous-external') ambiguous += 1;
     else external += 1;
   }
@@ -167,6 +174,7 @@ export function buildSummary(entries: RenderEntry[]): string {
   if (external) parts.push(`${external} 外部`);
   if (sideEffect) parts.push(`${sideEffect} 命令副作用`);
   if (ambiguous) parts.push(`${ambiguous} 歧义`);
+  if (formatted) parts.push(`${formatted} 格式化`);
   let summary = parts.join('，');
   if (summary.length > 120) summary = `${summary.slice(0, 117)}...`;
   return summary;

@@ -15,6 +15,8 @@ export interface FileDiff {
   truncated: boolean;
   /** Patch line count before truncation. */
   totalLines: number;
+  /** Lines omitted from `patch` when truncated (head+tail kept, FR-4.2). */
+  omittedLines: number;
 }
 
 /** Null-byte probe on the first 8KB — cheap binary detection (design §5.3). */
@@ -56,13 +58,23 @@ export function createFileDiff(
 
   const totalLines = lines.length;
   const truncated = totalLines > maxLines;
-  const body = truncated ? lines.slice(0, maxLines) : lines;
+  let omittedLines = 0;
+  let body = lines;
+  if (truncated) {
+    // FR-4.2: keep head and tail so the reader sees both where the change
+    // began and where it ended; the renderer annotates the omitted middle.
+    const tail = maxLines > 2 ? Math.min(3, maxLines - 2) : 0;
+    const head = maxLines - tail;
+    body = [...lines.slice(0, head), ...(tail > 0 ? lines.slice(-tail) : [])];
+    omittedLines = totalLines - body.length;
+  }
   return {
     added,
     removed,
     patch: body.join('\n'),
     truncated,
     totalLines,
+    omittedLines,
   };
 }
 

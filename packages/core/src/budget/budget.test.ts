@@ -9,6 +9,7 @@ function diff(lines: number): FileDiff {
     patch: Array.from({ length: lines }, (_, i) => `line${i}`).join('\n'),
     truncated: false,
     totalLines: lines,
+    omittedLines: 0,
   };
 }
 

@@ -26,6 +26,19 @@ describe('createFileDiff', () => {
     expect(diff!.truncated).toBe(true);
     expect(diff!.patch.split('\n').length).toBe(20);
     expect(diff!.totalLines).toBeGreaterThan(20);
+    expect(diff!.omittedLines).toBe(diff!.totalLines - 20);
+  });
+
+  it('keeps head and tail when truncated and reports the omitted count (FR-4.2)', () => {
+    const old = Array.from({ length: 100 }, (_, i) => `old${i}`).join('\n');
+    const next = Array.from({ length: 100 }, (_, i) => `new${i}`).join('\n');
+    const diff = createFileDiff(old, next, { maxLines: 20, contextLines: 0 })!;
+    expect(diff.truncated).toBe(true);
+    expect(diff.patch).toContain('-old0'); // head kept
+    expect(diff.patch).toContain('+new99'); // tail kept
+    expect(diff.patch).not.toContain('-old50'); // middle omitted
+    expect(diff.omittedLines).toBe(diff.totalLines - diff.patch.split('\n').length);
+    expect(diff.omittedLines).toBeGreaterThan(0);
   });
 });
 

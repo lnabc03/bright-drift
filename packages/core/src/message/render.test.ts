@@ -14,6 +14,7 @@ function smallDiff(added = 1, removed = 1): FileDiff {
     patch: '@@ -1,1 +1,1 @@\n-old\n+new',
     truncated: false,
     totalLines: 3,
+    omittedLines: 0,
   };
 }
 
@@ -122,6 +123,25 @@ describe('renderInjection (§5.6 protocol)', () => {
     ]);
     expect(text).toContain('EXTERNAL·DELETED (high confidence)  docs/draft.md');
   });
+
+  it('FR-4.2: truncated diffs carry an omission marker with the dropped line count', () => {
+    const { text } = renderInjection([
+      {
+        record: record('big.ts', 'modified'),
+        attribution: { category: 'C', confidence: 'high' },
+        diff: {
+          added: 100,
+          removed: 100,
+          patch: '@@ -1,100 +1,100 @@\n-old\n+new',
+          truncated: true,
+          totalLines: 201,
+          omittedLines: 180,
+        },
+      },
+    ]);
+    expect(text).toContain('+new');
+    expect(text).toContain('… [省略 180 行]');
+  });
 });
 
 describe('buildSummary (T12: ≤120 chars)', () => {
@@ -145,5 +165,13 @@ describe('buildSummary (T12: ≤120 chars)', () => {
       attribution: { category: 'C', confidence: 'high' },
     }));
     expect(buildSummary(entries).length).toBeLessThanOrEqual(120);
+  });
+
+  it('counts D-class (formatted) entries separately, not as external', () => {
+    const entries: RenderEntry[] = [
+      { record: record('a', 'modified'), attribution: { category: 'C', confidence: 'high' } },
+      { record: record('fmt', 'modified'), attribution: { category: 'D', confidence: 'high' } },
+    ];
+    expect(buildSummary(entries)).toBe('工作区漂移：2 个文件变更，1 外部，1 格式化');
   });
 });
