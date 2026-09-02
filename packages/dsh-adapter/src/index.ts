@@ -63,10 +63,21 @@ export function apply(ctx: CtxLike): void {
           resolver,
           logger,
           onOverrideReload: (root, rootStates) => {
+            const resolved = resolver.resolve(root);
             for (const s of rootStates) {
-              reconfigureState(s, resolver.resolve(root));
+              reconfigureState(s, resolved);
               syncWatcher(s);
             }
+            // §5.3: respectGitignore/extraIgnore may have changed.
+            void watchers
+              .refreshIgnore(root, resolved)
+              .catch((e) => logger.error('watcher.refresh-ignore', e, { root }));
+          },
+          onIgnoreRulesChanged: (root) => {
+            // .gitignore content changed — rebuild the matcher in place.
+            void watchers
+              .refreshIgnore(root, resolver.resolve(root))
+              .catch((e) => logger.error('watcher.refresh-ignore', e, { root }));
           },
         }),
       )
@@ -134,6 +145,12 @@ export function apply(ctx: CtxLike): void {
         for (const state of registry.all()) {
           reconfigureState(state, resolver.resolve(state.workspaceRoot));
           syncWatcher(state);
+        }
+        // §5.3: global respectGitignore/extraIgnore changes rebuild matchers.
+        for (const root of watchers.roots) {
+          void watchers
+            .refreshIgnore(root, resolver.resolve(root))
+            .catch((e) => logger.error('watcher.refresh-ignore', e, { root }));
         }
       };
       applyResolved(scope.get());

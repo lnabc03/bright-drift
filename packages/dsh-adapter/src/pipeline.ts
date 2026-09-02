@@ -24,6 +24,8 @@ export interface PipelineDeps {
   logger: Logger;
   /** Invoked after a project-override reload so live config re-applies (hot-update). */
   onOverrideReload?: (root: string, states: AgentState[]) => void;
+  /** Invoked when the workspace .gitignore changes so the matcher rebuilds (§5.3). */
+  onIgnoreRulesChanged?: (root: string) => void;
 }
 
 /**
@@ -41,6 +43,10 @@ export async function handleWatchBatch(
   if (events.some((e) => e.path === PROJECT_OVERRIDE_REL)) {
     await deps.resolver.reloadOverride(root).catch((e) => deps.logger.error('config.reload', e, { root }));
     deps.onOverrideReload?.(root, states);
+  }
+  // .gitignore content changes rebuild the ignore matcher (§5.3 hot-swap).
+  if (events.some((e) => e.path === '.gitignore')) {
+    deps.onIgnoreRulesChanged?.(root);
   }
 
   // Config is keyed by workspace root, so every session on it shares one

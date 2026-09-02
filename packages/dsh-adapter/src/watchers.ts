@@ -7,6 +7,12 @@ export interface WatchEntry {
   root: string;
   watcher: WorkspaceWatcher;
   refcount: number;
+  /**
+   * Live ignore matcher, hot-swappable (§5.3): the watcher consults it
+   * through a delegating closure per event, so config/.gitignore changes
+   * apply without re-creating chokidar.
+   */
+  ignored: (relPath: string) => boolean;
 }
 
 /**
@@ -43,10 +49,16 @@ export class WatchRegistry {
       onError: (e) => this.logger.error('ignore-rules', e, { root }),
     });
     const timer = this.timer;
-    const watcher = new WorkspaceWatcher({
+    // The entry is filled in two steps so the watcher closure can consult
+    // the LIVE matcher (hot-swapped by refreshIgnore) instead of a snapshot.
+    const entry = {} as WatchEntry;
+    entry.root = root;
+    entry.refcount = 1;
+    entry.ignored = ignored;
+    entry.watcher = new WorkspaceWatcher({
       root,
       debounceMs: 300,
-      ignored,
+      ignored: (rel) => entry.ignored(rel),
       onBatch: (events) => onBatch(root, events),
       onError: (e) => this.logger.error('watcher', e, { root }),
       // Adapt ctx.timer.debounce (returns fn with dispose) to the core
@@ -60,9 +72,21 @@ export class WatchRegistry {
           }
         : {}),
     });
-    watcher.start();
-    this.entries.set(root, { root, watcher, refcount: 1 });
+    entry.watcher.start();
+    this.entries.set(root, entry);
     this.logger.log('watcher.acquired', { root });
+  }
+
+  /** Rebuild the ignore matcher in place (config or .gitignore changed). */
+  async refreshIgnore(root: string, config: BrightDriftConfig): Promise<void> {
+    const entry = this.entries.get(root);
+    if (!entry) return;
+    entry.ignored = await createIgnoreMatcher(root, {
+      respectGitignore: config.watch.respectGitignore,
+      extraIgnore: config.watch.extraIgnore,
+      onError: (e) => this.logger.error('ignore-rules', e, { root }),
+    });
+    this.logger.log('watcher.ignore-refreshed', { root });
   }
 
   async release(root: string): Promise<void> {
