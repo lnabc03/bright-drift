@@ -53,6 +53,7 @@ PRD 的技术路线**成立**：dsh 的 Cordis 事件体系提供了 PRD §4.1 �
 | D6 | M0 实测 | 本会话不做运行时实测；设计基于已核实的静态契约（`.d.ts` + 官方插件 README + agent-loop 源码），M0 保留运行时验证清单（§8.1） |
 | D7 | includeUntracked 落地（2026-09 追加） | created 闸门：git 仓库内对「AKB 未知且磁盘存在」的候选路径做**惰性批量** `git ls-files -z -- <paths>` 判定（按 watcher 批次合并为单进程调用，非启动时全量建集）；未追踪且未被归因窗口预测的路径不入队。非 git 工作区 / git 不可用 → 无法区分 → created **全部上报**（保住该场景的认知同步价值，G1 优先于降噪） |
 | D8 | 静态分析接线（2026-09 追加） | FR-7.2 预测路径的两个生产作用：(a) 豁免 D7 的 created 闸门——命令自建文件（多为未追踪）必须照常上报 B 类；(b) 窗口关闭 + grace 之后、`longCommandMs` 之内落盘的预测路径写入归 **ambiguous-external**（措辞含命令原文，§3.6 不对称偏向），超出按 C 类。`classify` 扩展为 `classify(at, path?)`；`prune` 保留仍处于预测 horizon 内的已关窗。不新增配置键 |
+| D9 | diff 黑名单（2026-09 追加） | 用户手动兜底：`diff.blacklist`（gitignore 风格 glob，与 extraIgnore 同语法）。语义**只压 diff、保留文件级通知**（与 watch 层 extraIgnore 的「完全静默」差异化；不违 G1）；执行点在**探针层 hash-only**——黑名单文件只算哈希不取内容，内容不进 AKB 内存、不落 content-store（覆盖 .env 类敏感场景；E1 回声抑制仍精确）。默认为空，不替用户做主张。命令通道：`/bright-drift nodiff add\|remove\|list` 写入项目级 override 文件，借 §5.9 既有热重载闭环即时生效 |
 
 ---
 
@@ -204,7 +205,7 @@ write/edit 成功 → AKB 立即更新为磁盘实际内容哈希 → watcher �
 - **共享 watcher**：按 workspace root 去重，一个 root 一个 chokidar 实例，refcount 管理（多会话同 root 共享）；root 取自 `agent.session.header.cwd`（兜底 `ctx.sandboxPolicy.workspaceRoot`）。root 集合随 `agent/created`/`agent/disposed` 动态增删。
 - debounce 300ms 用 `ctx.timer.debounce`（随 fiber 自动 dispose）；同路径连续事件保留最终态。
 - 对账：事件路径规范化后与**所有持有该 root 的会话的 AKB** 比较；一致丢弃（回声），不一致进各会话的 DriftQueue。
-- 忽略规则：`.gitignore` + 内置表（`node_modules`、`.git`、构建产物、`~/.dsh/state/bright-drift` 自身）+ 配置 `watch.extraIgnore`。
+- 忽略规则：`.gitignore` + 内置表（`node_modules`、`.git`、构建产物、`~/.dsh/state/bright-drift` 自身）+ 配置 `watch.extraIgnore`。matcher 可热替换：`.gitignore` 变更或 `respectGitignore`/`extraIgnore` 配置热更新时即时重建，不需要重启 watcher（2026-09 补齐）。
 - **created 闸门**（D7，落实 PRD N2/FR-2.1）：`includeUntracked:false`（默认）时，created 漂移只覆盖 git 追踪路径。对账前对「AKB 未知且磁盘存在」的候选路径做一次惰性批量 `git ls-files -z -- <paths>`（按 watcher 批次合并为单进程调用，非启动时全量建集）；未追踪且未被归因窗口预测（D8a）的路径不入队。非 git 工作区或 git 不可用 → 无法区分 → created 全部上报。闸门先于 rename 合并生效：目标路径被抑报时，delete 侧保留为 DELETED 独立上报（agent 失去该文件的认知，删除才是要害事实）。
 - 二进制（null 字节探测）与 >`diff.maxFileSizeKB`（默认 512KB）仅文件级上报；编辑器原子写以内容哈希为准，不产生误报（FR-2.4/2.5 不变）。
 - symlink 不跟随 root 之外（E13 不变）。
@@ -370,6 +371,7 @@ budget:
 diff:
   contextLines: 3
   maxFileSizeKB: 512
+  blacklist: []               # D9 新增：diff 黑名单（gitignore 风格 glob）
 baseline:
   maxEntries: 5000
   persist: true
@@ -386,6 +388,8 @@ attribution:
   formatterSilent: false
 ```
 
+**diff 黑名单**（D9）：命中 `diff.blacklist` 的文件走 **hash-only 探针**——只算 SHA-1，不取内容；文件级通知保留（"X 被修改（diff 已被 diff.blacklist 抑制）"），行级 diff 不生成、内容不进 AKB 内存与 content-store。与 `watch.extraIgnore`（watch 层完全静默）是两个层级：黑名单保感知、压内容。回声抑制不受影响（agent 自己写黑名单文件时 observe 同样 hash-only，watcher 回声哈希一致即丢弃）。黑名单生效前已入库的内容副本不追溯清除，靠 content-store LRU 自然淘汰（E21）。全局与项目级双通道，热更新即时生效；`/bright-drift nodiff` 命令（§5.10）写入项目级文件，闭环免手工编辑。
+
 ### 5.10 命令与可观测性（FR-6 修订）
 
 `ctx.commands.register({ name: 'bright-drift', … })`，handler 内解析 `rawInput` 子命令，返回 `{kind:'success', text}`（Web/headless 原生渲染）：
@@ -395,6 +399,7 @@ attribution:
 | `/bright-drift status` | 当前会话 AKB 规模、待注入队列、累计注入次数/token、watcher root 列表 |
 | `/bright-drift diff <path>` | 预览该文件待注入 diff（受预算截断） |
 | `/bright-drift pause` / `resume` | 暂停/恢复注入（watcher 与 AKB 维护不停，恢复后一次性补投累计漂移） |
+| `/bright-drift nodiff add\|remove\|list`（D9） | 管理 diff 黑名单：add/remove 写入项目级 `.dsh/bright-drift.yml` 的 `diff.blacklist`（yaml Document API 保留注释，显式 UTF-8；文件/目录不存在则创建），watcher 命中 override 热重载即时生效；list 显示当前生效清单（含来源） |
 
 日志：`~/.dsh/logs/bright-drift/<date>.log`（插件自建目录；dsh home 解析复刻 `$DSH_HOME || ~/.dsh` 规则，不依赖内部包）。内容同 PRD FR-6（哈希前后值，不含文件内容）。fail-open：所有事件监听体外层 try/catch，异常仅写日志（E10/G5 不变）。
 
@@ -423,6 +428,7 @@ E1–E15 全部保留，修订/新增如下：
 | E18（新） | content-store blob 被 LRU 淘汰 | 该文件 modified 漂移降级文件级 + `+a/-b` 统计（语义同 E8） |
 | E19（新） | 队列记录与磁盘现状脱节（幻影创建/净零修改/删后重建） | 渲染前对队列做**再验证**（revalidate）：逐条 re-probe。created 目标已不存在 → 丢弃（phantom-create，典型场景：资源管理器新建 txt→改名→编辑→再改名，旧路径从未入 AKB，E5 跨批次无法合并）；modified 重探哈希已回到基线 → 丢弃（净零）；deleted 目标已重建 → 哈希同基线丢弃（E4 语义），不同则改判 modified；renamed 目标已不存在 → fromPath 有基线则改判 deleted，否则丢弃。再验证只修正 kind/刷新哈希，**归因沿用入队时的分类**（窗口语义属于事件发生时刻）。probe 失败 fail-open 保留原记录。被丢弃的记录随本次成功渲染一并退休（commitRendered 覆盖 rendered+dropped），不残留队列。 |
 | E20（新） | 非 git 工作区 / git 不可用时的 created 语义 | 无法区分追踪与否 → created 全部上报（D7）；git 仓库内未追踪路径默认抑报，除非 `includeUntracked:true` 或被归因窗口预测（D8a）。用户 `git add` 后内容未变不会再触发事件，该路径保持静默直到下一次真实变更——可接受 |
+| E21（新） | diff 黑名单（D9）的滞存与边界 | 黑名单生效前已入库的内容副本不追溯清除，靠 content-store LRU 淘汰；黑名单文件自己 write/edit 时 observe 同样 hash-only → E1 回声抑制仍精确；已入队记录在渲染前再验证（E19）时按当时配置重新判定 suppressed 标记；`/bright-drift diff <path>` 预览对黑名单路径同步降级为文件级+提示 |
 
 **§5.5.2 Sync Point 补充**：Sync Point 的完整顺序为 `peek → revalidate（E19）→ render → 成功后才 commitRendered + AKB rebase`。revalidate 的探测 IO 以队列长度为界（渲染上限 50 文件/次，超出部分留在队列等下一注入点自然再验证）。
 
