@@ -26,3 +26,15 @@ export function shouldInjectAtPreStep(ctx: PreStepContext): boolean {
   if (ctx.toolsRanSinceLastStep) return true; // tool-loop continuation — inject
   return false; // suspected closing check — defer to next turn
 }
+
+/**
+ * Phase-2 Claude Code channel (design phase-2 §5.6.1, additive CC variant).
+ *
+ * A user prompt always opens a fresh, billable turn — there is no
+ * closing-check ambiguity to guard against (unlike pre-step), so the only
+ * question is whether anything is pending. Kept as a named predicate so the
+ * channel policy lives in one tested place alongside its pre-step sibling.
+ */
+export function shouldInjectAtUserPrompt(queueEmpty: boolean): boolean {
+  return !queueEmpty;
+}

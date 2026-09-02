@@ -61,5 +61,5 @@ export { renderInjection, buildSummary } from './message/render.js';
 export type { RenderEntry, RenderOptions, RenderedInjection } from './message/render.js';
 
 // sync policy
-export { shouldInjectAtPreStep } from './sync/policy.js';
+export { shouldInjectAtPreStep, shouldInjectAtUserPrompt } from './sync/policy.js';
 export type { PreStepContext } from './sync/policy.js';
