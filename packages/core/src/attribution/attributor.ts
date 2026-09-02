@@ -112,11 +112,24 @@ export class Attributor {
    * Classify one drift record. Category A never reaches this point (self
    * writes are dropped as echoes at reconcile time, design §5.2.4); D is
    * decided later at render time (`isCosmeticDiff` + formatter window).
+   *
+   * `path` enables the D8b wiring: a write to a statically predicted target
+   * landing AFTER the grace window but within `longCommandMs` of the
+   * command's close is still plausibly its late output — ambiguous-external
+   * per the §3.6 asymmetric bias (the command hypothesis is named).
    */
-  classify(recordAt: number): Attribution {
+  classify(recordAt: number, path?: string): Attribution {
     this.prune();
     const candidates = this.covering(recordAt);
-    if (candidates.length === 0) return { category: 'C', confidence: 'high' };
+    if (candidates.length === 0) {
+      if (path !== undefined) {
+        const w = this.latePredictedWindow(path, recordAt);
+        if (w) {
+          return { category: 'C', confidence: 'ambiguous-external', command: w.command };
+        }
+      }
+      return { category: 'C', confidence: 'high' };
+    }
 
     // Latest window wins when several overlap.
     const w = candidates[candidates.length - 1]!;
@@ -135,10 +148,41 @@ export class Attributor {
     return this.covering(at).some((w) => w.predictedPaths.includes(path));
   }
 
-  /** Drop windows past their effective coverage. */
+  /**
+   * Whether a path is a predicted write target of a covering window OR of a
+   * recently-closed foreground window still inside its late-write horizon
+   * (closedAt + longCommandMs, D8). Used by the created-gate exemption and
+   * the late-write attribution branch.
+   */
+  predictedRecently(path: string, at: number): boolean {
+    if (this.covering(at).some((w) => w.predictedPaths.includes(path))) return true;
+    return this.latePredictedWindow(path, at) !== undefined;
+  }
+
+  /** Recently-closed foreground window predicting `path`, within horizon. */
+  private latePredictedWindow(path: string, at: number): ShellWindow | undefined {
+    for (let i = this.windows.length - 1; i >= 0; i -= 1) {
+      const w = this.windows[i]!;
+      if (w.background || w.closedAt === undefined) continue;
+      if (!w.predictedPaths.includes(path)) continue;
+      if (at > w.effectiveUntil && at <= w.closedAt + this.longCommandMs) return w;
+    }
+    return undefined;
+  }
+
+  /**
+   * Drop windows past their effective coverage. Closed foreground windows
+   * with predicted paths survive until their late-write horizon
+   * (closedAt + longCommandMs) so the D8b branch can still see them.
+   */
   prune(): void {
     const t = this.now();
-    this.windows = this.windows.filter((w) => w.effectiveUntil >= t || w.closedAt === undefined);
+    this.windows = this.windows.filter(
+      (w) =>
+        w.effectiveUntil >= t ||
+        w.closedAt === undefined ||
+        (w.predictedPaths.length > 0 && w.closedAt + this.longCommandMs >= t),
+    );
   }
 
   /** Serializable state for cross-process handoff (PRD §6.2-5). */

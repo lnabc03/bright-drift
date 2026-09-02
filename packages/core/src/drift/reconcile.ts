@@ -7,7 +7,9 @@ import type { DriftRecord, FileObservation } from './types.js';
  * (watcher pipeline, session-start reconciler) gathers observations.
  *
  * Classification rules (design §5.3, PRD §4.4):
- * - exists && unknown to AKB            → created
+ * - exists && unknown to AKB            → created, subject to the
+ *   `createdFilter` gate (D7: git-tracked only unless includeUntracked;
+ *   window-predicted paths exempt, D8a)
  * - exists && hash matches baseline     → echo, dropped (E1)
  * - exists && baseline was knownDeleted → modified when hash differs (E4),
  *                                         nothing when identical
@@ -16,12 +18,20 @@ import type { DriftRecord, FileObservation } from './types.js';
  * - missing && untracked / knownDeleted → nothing
  *
  * A post-pass merges deleted+created pairs with identical hashes into a
- * single `renamed` record (E5).
+ * single `renamed` record (E5). The gate runs BEFORE the merge: a created
+ * suppressed by the gate can neither appear nor absorb a deleted record
+ * (the delete stays reported on its own — losing the file is the salient fact).
  */
+export interface ReconcileOptions {
+  /** Gate for `created` records (design D7); absent = report every create. */
+  createdFilter?: (path: string) => boolean;
+}
+
 export function reconcile(
   akb: AgentKnowledgeBase,
   observations: FileObservation[],
   now: number,
+  options: ReconcileOptions = {},
 ): DriftRecord[] {
   const records: DriftRecord[] = [];
 
@@ -43,6 +53,7 @@ export function reconcile(
         obs.contentHash !== undefined && entry?.contentHash === obs.contentHash;
       if (sameHash) continue; // E1 echo / E4 identical recreate
       if (!entry) {
+        if (options.createdFilter && !options.createdFilter(obs.path)) continue; // D7 gate
         records.push({ ...base, kind: 'created', contentAvailable: false });
       } else {
         // Line-level diffs need a complete baseline copy AND current content.

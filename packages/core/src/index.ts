@@ -17,9 +17,14 @@ export type {
   DebounceFactory,
 } from './watcher/watcher.js';
 export { createIgnoreMatcher, BUILTIN_IGNORE } from './watcher/ignore.js';
+export { resolveGitTracked } from './watcher/git.js';
+export type { TrackedStatus } from './watcher/git.js';
 
 // drift
 export { reconcile, mergeRenames } from './drift/reconcile.js';
+export type { ReconcileOptions } from './drift/reconcile.js';
+export { makeCreatedFilter } from './drift/created-gate.js';
+export type { CreatedGateOptions } from './drift/created-gate.js';
 export { revalidateRecords } from './drift/revalidate.js';
 export type { RevalidateResult, RevalidateDrop, RevalidateDropReason } from './drift/revalidate.js';
 export { DriftQueue } from './drift/queue.js';

@@ -110,6 +110,47 @@ describe('Attributor', () => {
     expect(a.classify(clock)).toMatchObject({ confidence: 'ambiguous-external' });
   });
 
+  it('D8b: predicted write after grace but within longCommandMs → ambiguous-external', () => {
+    const a = new Attributor({ now, windowGraceMs: 1500, longCommandMs: 10_000 });
+    a.openWindow(window({ predictedPaths: ['out.txt'] }));
+    clock = 100;
+    a.closeWindow('call-1'); // effectiveUntil = 1600
+    clock = 5000; // past grace, inside the late-write horizon (100 + 10000)
+    expect(a.classify(clock, 'out.txt')).toMatchObject({
+      category: 'C',
+      confidence: 'ambiguous-external',
+      command: 'npm run codegen',
+    });
+  });
+
+  it('D8b: unpredicted path after grace stays plain external', () => {
+    const a = new Attributor({ now, windowGraceMs: 1500, longCommandMs: 10_000 });
+    a.openWindow(window({ predictedPaths: ['out.txt'] }));
+    clock = 100;
+    a.closeWindow('call-1');
+    clock = 5000;
+    expect(a.classify(clock, 'other.txt')).toEqual({ category: 'C', confidence: 'high' });
+  });
+
+  it('D8b: predicted write beyond the horizon is plain external (window pruned)', () => {
+    const a = new Attributor({ now, windowGraceMs: 1500, longCommandMs: 10_000 });
+    a.openWindow(window({ predictedPaths: ['out.txt'] }));
+    clock = 100;
+    a.closeWindow('call-1');
+    clock = 100 + 10_000 + 1;
+    expect(a.classify(clock, 'out.txt')).toEqual({ category: 'C', confidence: 'high' });
+  });
+
+  it('predictedRecently covers open windows and the late horizon', () => {
+    const a = new Attributor({ now, windowGraceMs: 1500, longCommandMs: 10_000 });
+    a.openWindow(window({ predictedPaths: ['out.txt'] }));
+    expect(a.predictedRecently('out.txt', 50)).toBe(true); // covering
+    a.closeWindow('call-1', 100); // effectiveUntil = 1600
+    expect(a.predictedRecently('out.txt', 2000)).toBe(true); // past grace, within horizon
+    expect(a.predictedRecently('out.txt', 20_000)).toBe(false); // beyond horizon
+    expect(a.predictedRecently('nope.txt', 50)).toBe(false);
+  });
+
   it('prunes windows past their coverage', () => {
     const a = new Attributor({ now, windowGraceMs: 100 });
     a.openWindow(window());
