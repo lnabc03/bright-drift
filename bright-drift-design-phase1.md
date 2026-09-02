@@ -51,6 +51,8 @@ PRD 的技术路线**成立**：dsh 的 Cordis 事件体系提供了 PRD §4.1 �
 | D4 | 客户端 UI | 一期**纯 Host + 斜杠命令**；漂移状态面板留 v1.1 |
 | D5 | FR-7 范围 | **前台 bash + pwsh 全做**（Windows 上 dsh 的 shell 工具是 `pwsh`，重定向/写入语法单独覆盖）；`run_in_background` 后台任务窗口存活期不定，一律标 ambiguous-external |
 | D6 | M0 实测 | 本会话不做运行时实测；设计基于已核实的静态契约（`.d.ts` + 官方插件 README + agent-loop 源码），M0 保留运行时验证清单（§8.1） |
+| D7 | includeUntracked 落地（2026-09 追加） | created 闸门：git 仓库内对「AKB 未知且磁盘存在」的候选路径做**惰性批量** `git ls-files -z -- <paths>` 判定（按 watcher 批次合并为单进程调用，非启动时全量建集）；未追踪且未被归因窗口预测的路径不入队。非 git 工作区 / git 不可用 → 无法区分 → created **全部上报**（保住该场景的认知同步价值，G1 优先于降噪） |
+| D8 | 静态分析接线（2026-09 追加） | FR-7.2 预测路径的两个生产作用：(a) 豁免 D7 的 created 闸门——命令自建文件（多为未追踪）必须照常上报 B 类；(b) 窗口关闭 + grace 之后、`longCommandMs` 之内落盘的预测路径写入归 **ambiguous-external**（措辞含命令原文，§3.6 不对称偏向），超出按 C 类。`classify` 扩展为 `classify(at, path?)`；`prune` 保留仍处于预测 horizon 内的已关窗。不新增配置键 |
 
 ---
 
@@ -203,6 +205,7 @@ write/edit 成功 → AKB 立即更新为磁盘实际内容哈希 → watcher �
 - debounce 300ms 用 `ctx.timer.debounce`（随 fiber 自动 dispose）；同路径连续事件保留最终态。
 - 对账：事件路径规范化后与**所有持有该 root 的会话的 AKB** 比较；一致丢弃（回声），不一致进各会话的 DriftQueue。
 - 忽略规则：`.gitignore` + 内置表（`node_modules`、`.git`、构建产物、`~/.dsh/state/bright-drift` 自身）+ 配置 `watch.extraIgnore`。
+- **created 闸门**（D7，落实 PRD N2/FR-2.1）：`includeUntracked:false`（默认）时，created 漂移只覆盖 git 追踪路径。对账前对「AKB 未知且磁盘存在」的候选路径做一次惰性批量 `git ls-files -z -- <paths>`（按 watcher 批次合并为单进程调用，非启动时全量建集）；未追踪且未被归因窗口预测（D8a）的路径不入队。非 git 工作区或 git 不可用 → 无法区分 → created 全部上报。闸门先于 rename 合并生效：目标路径被抑报时，delete 侧保留为 DELETED 独立上报（agent 失去该文件的认知，删除才是要害事实）。
 - 二进制（null 字节探测）与 >`diff.maxFileSizeKB`（默认 512KB）仅文件级上报；编辑器原子写以内容哈希为准，不产生误报（FR-2.4/2.5 不变）。
 - symlink 不跟随 root 之外（E13 不变）。
 
@@ -220,7 +223,7 @@ write/edit 成功 → AKB 立即更新为磁盘实际内容哈希 → watcher �
 #### 5.4.2 FR-7 快照窗口（修订点）
 
 - `tools/pre-execute` 匹配 `bash`/`pwsh` 且 `run_in_background !== true`：对 AKB 全集 + 静态分析预测路径取快照（FR-7.5 成本约束不变：AKB >1000 文件时仅 mtime/size，哈希惰性）。
-- **静态分析双语法**（D5）：bash 侧 `>`/`>>`/`tee`/`sed -i`/`-o`；pwsh 侧 `>`/`>>`（PowerShell 同样支持重定向）、`Out-File [-Append]`、`Set-Content`/`Add-Content`、`Tee-Object`。解析失败不报错，退回纯窗口归因。
+- **静态分析双语法**（D5）：bash 侧 `>`/`>>`/`tee`/`sed -i`/`-o`；pwsh 侧 `>`/`>>`（PowerShell 同样支持重定向）、`Out-File [-Append]`、`Set-Content`/`Add-Content`、`Tee-Object`。解析失败不报错，退回纯窗口归因。**预测路径的生产作用**（D8）：(a) 豁免 §5.3 的 created 闸门——命令自己新建的文件（多为未追踪）必须照常上报 B 类；(b) 窗口关闭 + grace 之后、`longCommandMs` 之内落盘的预测路径写入归 ambiguous-external（措辞含命令原文），超出按 C 类。分类判定扩展为 `classify(at, path?)`；`prune` 相应保留仍处于预测 horizon 内的已关窗。
 - `tools/post-execute`（同一 exec）+ 1.5s grace 后二次快照归因。
 - **后台任务**：`run_in_background: true` 的调用，命令结束后写盘仍在继续（Job 存活期不定）。一期不追踪 Job 生命周期；其 pre-execute 快照保留**但不关闭窗口**，窗口内变更一律标 `ambiguous-external`（措辞含命令原文与「后台任务」说明）——符合 §3.6 不对称偏向。
 - 长命令（>10s）、歧义偏向、状态机可序列化：PRD FR-7.4/7.6 不变。
@@ -419,6 +422,7 @@ E1–E15 全部保留，修订/新增如下：
 | E17（新） | Code Mode（run_code）子调用写文件 | 顶层 tools/result 不含子调用写盘细节 → watcher + FR-7 窗口归 B 类兜底（§5.2.2） |
 | E18（新） | content-store blob 被 LRU 淘汰 | 该文件 modified 漂移降级文件级 + `+a/-b` 统计（语义同 E8） |
 | E19（新） | 队列记录与磁盘现状脱节（幻影创建/净零修改/删后重建） | 渲染前对队列做**再验证**（revalidate）：逐条 re-probe。created 目标已不存在 → 丢弃（phantom-create，典型场景：资源管理器新建 txt→改名→编辑→再改名，旧路径从未入 AKB，E5 跨批次无法合并）；modified 重探哈希已回到基线 → 丢弃（净零）；deleted 目标已重建 → 哈希同基线丢弃（E4 语义），不同则改判 modified；renamed 目标已不存在 → fromPath 有基线则改判 deleted，否则丢弃。再验证只修正 kind/刷新哈希，**归因沿用入队时的分类**（窗口语义属于事件发生时刻）。probe 失败 fail-open 保留原记录。被丢弃的记录随本次成功渲染一并退休（commitRendered 覆盖 rendered+dropped），不残留队列。 |
+| E20（新） | 非 git 工作区 / git 不可用时的 created 语义 | 无法区分追踪与否 → created 全部上报（D7）；git 仓库内未追踪路径默认抑报，除非 `includeUntracked:true` 或被归因窗口预测（D8a）。用户 `git add` 后内容未变不会再触发事件，该路径保持静默直到下一次真实变更——可接受 |
 
 **§5.5.2 Sync Point 补充**：Sync Point 的完整顺序为 `peek → revalidate（E19）→ render → 成功后才 commitRendered + AKB rebase`。revalidate 的探测 IO 以队列长度为界（渲染上限 50 文件/次，超出部分留在队列等下一注入点自然再验证）。
 
