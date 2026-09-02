@@ -42,7 +42,13 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  if (daemon?.pid && pidAlive(daemon.pid)) daemon.kill('SIGTERM');
+  // SIGTERM alone is not enough: the daemon's async snapshot writes
+  // (contentStore blobs, saveSessionState) may still be in flight, and
+  // Linux CI rm -rf raced them into ENOTEMPTY. Wait for actual exit.
+  if (daemon?.pid && pidAlive(daemon.pid)) {
+    daemon.kill('SIGTERM');
+    await waitFor(() => !pidAlive(daemon!.pid!), 5_000);
+  }
   daemon = undefined;
   delete process.env.BRIGHT_DRIFT_STATE_HOME;
   delete process.env.BRIGHT_DRIFT_DAEMON_ENTRY;

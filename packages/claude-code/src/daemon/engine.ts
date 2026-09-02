@@ -83,6 +83,9 @@ export class WorkspaceEngine {
   }
 
   async stop(): Promise<void> {
+    // Let in-flight cold-start reconciles settle before snapshotting —
+    // they render and write session state (Linux CI ENOTEMPTY race).
+    await Promise.allSettled([...this.inFlight]);
     for (const state of this.sessions.values()) await saveSessionState(this.hash, state);
     await this.watcher?.stop();
   }
@@ -130,6 +133,14 @@ export class WorkspaceEngine {
 
   // ---- session lifecycle -------------------------------------------------
 
+  /** Fire-and-forget engine work that must settle before stop() returns. */
+  private readonly inFlight = new Set<Promise<unknown>>();
+
+  private track(p: Promise<unknown>): void {
+    this.inFlight.add(p);
+    void p.finally(() => this.inFlight.delete(p));
+  }
+
   async handleRegister(sessionId: string): Promise<void> {
     const config = this.config;
     let state = this.sessions.get(sessionId);
@@ -139,9 +150,11 @@ export class WorkspaceEngine {
         createSessionState(sessionId, this.workspaceRoot, this.hash, config);
       this.sessions.set(sessionId, state);
       // Cold-start reconcile (§5.6.5): async, never blocks registration.
-      void reconcileOnStart(state, config)
-        .then(() => this.renderSession(sessionId))
-        .catch((e) => void log(`reconcile ${sessionId}: ${(e as Error).message}`));
+      this.track(
+        reconcileOnStart(state, config)
+          .then(() => this.renderSession(sessionId))
+          .catch((e) => void log(`reconcile ${sessionId}: ${(e as Error).message}`)),
+      );
     }
   }
 
