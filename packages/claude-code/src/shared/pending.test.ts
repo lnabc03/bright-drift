@@ -59,13 +59,19 @@ describe('readPending', () => {
 describe('markDelivered', () => {
   it('appends the channel exactly once', async () => {
     await write(sample());
-    await markDelivered(HASH, 's1', 'user-prompt-submit');
-    await markDelivered(HASH, 's1', 'user-prompt-submit');
+    await markDelivered(HASH, 's1', 'user-prompt-submit', 'b1');
+    await markDelivered(HASH, 's1', 'user-prompt-submit', 'b1');
     const p = await readPending(HASH, 's1');
     expect(p?.deliveredVia).toEqual(['user-prompt-submit']);
   });
 
+  it('refuses to mark a batch that was replaced mid-flight (render race)', async () => {
+    await write(sample({ batchId: 'b2' })); // daemon already overwrote with the next batch
+    await markDelivered(HASH, 's1', 'user-prompt-submit', 'b1'); // stale batchId from the hook's read
+    expect((await readPending(HASH, 's1'))?.deliveredVia).toEqual([]);
+  });
+
   it('is a no-op when there is no pending file', async () => {
-    await markDelivered(HASH, 's1', 'stop'); // must not throw
+    await markDelivered(HASH, 's1', 'stop', 'b1'); // must not throw
   });
 });

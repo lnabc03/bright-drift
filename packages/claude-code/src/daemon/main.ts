@@ -65,6 +65,11 @@ async function pollMailboxes(): Promise<void> {
   // Config + pause hot-reload ride the same tick (mtime/stat polls, §5.8/§5.10).
   await engine.pollConfig().catch(() => {});
   await engine.pollPaused().catch(() => {});
+  // Delivery-triggered re-render (smoke-test 2026-09-02): drift arriving
+  // while a batch sits undelivered accumulates in the queue; once the hook
+  // marks the batch delivered, the next tick renders the accumulated
+  // records. Without this the queue could stall until the next file event.
+  await engine.renderAll().catch(() => {});
 }
 
 /**
