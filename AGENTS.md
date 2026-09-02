@@ -40,6 +40,7 @@ docs/              # PRD、设计文档（当前在仓库根，M1 时迁入）
 - 提交信息用 Conventional Commits：`feat(core): …`、`fix(adapter): …`、`docs: …`、`test: …`、`chore: …`。scope 只用包名（`core`/`dsh-adapter`）或 `repo`。
 - 一个 PR 只做一件事；改动 core 公共 API 的 PR 必须在描述里写明对二期 adapter 的影响（core API 在 v1.0 前标记 experimental，见 PRD §9.3）。
 - 语义化版本；core 与 adapter 同仓库但独立发版（`bright-drift-core` / `bright-drift`）。
+- **发布走 tag 自动化**（`.github/workflows/release.yml`）：先把两包版本号 bump 对齐并合入 main，再 `git tag vX.Y.Z <commit> && git push origin vX.Y.Z`。workflow 会全量 build/typecheck/test、校验 tag 与 package.json 版本一致且 commit 在 main 上、按 core→adapter 顺序发包、自动建 GitHub Release。npm 凭据是 repo secret `NPM_TOKEN`（granular automation token，绕 2FA）；任何 agent 不经手凭据（§5）。禁止把 tag 打在非发布 commit 上再前移（2026-08 事故）。
 
 ### 3.3 测试要求
 

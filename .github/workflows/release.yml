@@ -1,0 +1,86 @@
+name: Release
+
+# Tag-driven publish: pushing vX.Y.Z runs the full gate, verifies the tag
+# matches both package.json versions and sits on main, publishes core then
+# adapter to npm (NODE_AUTH_TOKEN from the NPM_TOKEN repo secret — an
+# automation token that bypasses interactive 2FA), then creates the GitHub
+# Release with auto-generated notes.
+
+on:
+  push:
+    tags: ['v*']
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write # gh release create
+
+jobs:
+  release:
+    name: Publish ${{ github.ref_name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout (full history for the main-branch check)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - name: Set up Node.js (with npm registry auth)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Build must run before tests: the dsh-adapter tests import
+      # `bright-drift-core` through its built lib/ entry.
+      - name: Build
+        run: pnpm -r build
+
+      - name: Typecheck
+        run: pnpm -r typecheck
+
+      - name: Test
+        run: pnpm -r test
+
+      - name: Verify tag matches package versions and sits on main
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          CORE=$(node -p "require('./packages/core/package.json').version")
+          ADAPTER=$(node -p "require('./packages/dsh-adapter/package.json').version")
+          if [ "$TAG_VERSION" != "$CORE" ] || [ "$TAG_VERSION" != "$ADAPTER" ]; then
+            echo "Tag $GITHUB_REF_NAME but core=$CORE adapter=$ADAPTER — bump both packages first."
+            exit 1
+          fi
+          git fetch origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "Tag $GITHUB_REF_NAME is not on origin/main — refusing to publish a stray commit."
+            exit 1
+          fi
+
+      # Order matters: the adapter depends on bright-drift-core@<same version>.
+      - name: Publish bright-drift-core
+        run: pnpm --filter bright-drift-core publish --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish bright-drift
+        run: pnpm --filter bright-drift publish --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Create GitHub Release
+        run: gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --generate-notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
