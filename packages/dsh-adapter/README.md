@@ -13,7 +13,7 @@ required, or pnpm fails on the adapter's `workspace:*` dependency.
 
 Mounts as a host-plane bundle (`cordis.patch.yml` insert row). Host-only; no browser UI.
 
-- Commands: `/bright-drift status | diff <path> | pause | resume`
+- Commands: `/bright-drift status | diff <path> | nodiff add|remove|list [pattern] | pause | resume`
 - Global settings namespace: `bright-drift` (see root README for the schema)
 - Project override: `<workspace>/.dsh/bright-drift.yml`
 - Logs: `~/.dsh/logs/bright-drift/<date>.log` (hashes/paths/counts only — never file contents)

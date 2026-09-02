@@ -91,6 +91,7 @@ dsh plugin --profile web add link:./packages/dsh-adapter
 - 聊天中的斜杠命令：
   - `/bright-drift status` — AKB 大小、待注入漂移、注入计数
   - `/bright-drift diff <path>` — 预览单个文件的待注入 diff
+  - `/bright-drift nodiff add|remove|list [pattern]` — 管理 diff 黑名单（写入项目级 `.dsh/bright-drift.yml`，立即生效）
   - `/bright-drift pause` / `resume` — 暂停注入（监控继续）；恢复时累积的漂移一次性补投
 
 ## 配置
@@ -108,6 +109,9 @@ bright-drift:
   diff:
     contextLines: 3
     maxFileSizeKB: 512
+    blacklist: []              # diff 黑名单（gitignore 风格 glob）：命中的文件
+                               # 只保留文件级通知，不生成 diff、不存内容副本；
+                               # 也可用 /bright-drift nodiff add|remove|list 管理
   attribution:
     bashWindowGraceMs: 1500    # 命令结束后的宽限期内写入 = 其副作用
     longCommandMs: 10000       # 更长的命令 → ambiguous-external 措辞

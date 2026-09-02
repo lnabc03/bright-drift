@@ -92,6 +92,7 @@ Nothing to configure by default. Once installed:
 - Slash commands in the chat:
   - `/bright-drift status` — AKB size, pending drift, injection counters
   - `/bright-drift diff <path>` — preview the pending diff for one file
+  - `/bright-drift nodiff add|remove|list [pattern]` — manage the diff blacklist (writes the project-level `.dsh/bright-drift.yml`, applies immediately)
   - `/bright-drift pause` / `resume` — pause injections (monitoring continues); accumulated drift is delivered in one batch on resume
 
 ## Configuration
@@ -109,6 +110,9 @@ bright-drift:
   diff:
     contextLines: 3
     maxFileSizeKB: 512
+    blacklist: []              # diff blacklist (gitignore-style globs): matched files
+                               # keep file-level notices only — no diff, no content copies;
+                               # manageable via /bright-drift nodiff add|remove|list
   attribution:
     bashWindowGraceMs: 1500    # writes within grace after a command end = its side-effect
     longCommandMs: 10000       # longer commands → ambiguous-external wording
