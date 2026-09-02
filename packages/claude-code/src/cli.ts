@@ -1,11 +1,12 @@
 import { hooksDir, install, selfcheck, uninstall } from './installer/install.js';
-import { cmdNodiff, cmdPause, cmdResume, cmdStatus } from './cli-commands.js';
+import { cmdDiff, cmdNodiff, cmdPause, cmdResume, cmdStatus } from './cli-commands.js';
 
 /**
  * CLI entry (design §5.9/§5.10):
  *   bright-drift-claude-code install [--project]
  *   bright-drift-claude-code uninstall [--project] [--purge]
  *   bright-drift-claude-code status
+ *   bright-drift-claude-code diff <path>
  *   bright-drift-claude-code pause | resume
  *   bright-drift-claude-code nodiff <glob> [...]
  */
@@ -17,6 +18,7 @@ function usage(): void {
       '  bright-drift-claude-code install [--project]    Merge hooks into settings.json',
       '  bright-drift-claude-code uninstall [--project] [--purge]',
       '  bright-drift-claude-code status                 Daemon/session/pending overview',
+      '  bright-drift-claude-code diff <path>            Diff a file vs the last delivered baseline',
       '  bright-drift-claude-code pause                  Pause injection (monitoring continues)',
       '  bright-drift-claude-code resume                 Resume; accumulated drift is delivered',
       '  bright-drift-claude-code nodiff <glob> [...]    Suppress diffs for paths (list only)',
@@ -34,8 +36,13 @@ async function main(argv: string[]): Promise<number> {
 
   switch (command) {
     case 'install': {
-      const { settingsPath } = await install({ project });
+      const { settingsPath, stoppedDaemons } = await install({ project });
       console.log(`bright-drift hooks merged into ${settingsPath}`);
+      if (stoppedDaemons > 0) {
+        console.log(
+          `stopped ${stoppedDaemons} running daemon(s) — they relaunch on the next session with the freshly installed build`,
+        );
+      }
       const check = selfcheck(hooksDir());
       if (check.ok) {
         console.log(`selfcheck ok (${check.detail})`);
@@ -54,6 +61,8 @@ async function main(argv: string[]): Promise<number> {
     }
     case 'status':
       return cmdStatus();
+    case 'diff':
+      return cmdDiff(rest.filter((a) => !a.startsWith('--'))[0]);
     case 'pause':
       return cmdPause();
     case 'resume':
