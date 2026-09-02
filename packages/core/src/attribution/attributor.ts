@@ -62,14 +62,20 @@ export interface AttributorOptions {
  */
 export class Attributor {
   private windows: ShellWindow[] = [];
-  private readonly graceMs: number;
-  private readonly longCommandMs: number;
+  private graceMs: number;
+  private longCommandMs: number;
   private readonly now: () => number;
 
   constructor(options: AttributorOptions = {}) {
     this.graceMs = options.windowGraceMs ?? 1500;
     this.longCommandMs = options.longCommandMs ?? 10000;
     this.now = options.now ?? Date.now;
+  }
+
+  /** Update the attribution windows live (settings hot-update / post-resume). */
+  setWindows(graceMs: number, longCommandMs: number): void {
+    this.graceMs = graceMs;
+    this.longCommandMs = longCommandMs;
   }
 
   /** Open a window for a foreground or background shell call. */

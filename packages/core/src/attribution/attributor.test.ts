@@ -100,6 +100,16 @@ describe('Attributor', () => {
     expect(restored.predictedByAnyWindow('out.txt', clock)).toBe(true);
   });
 
+  it('setWindows re-applies grace/long thresholds live', () => {
+    const a = new Attributor({ now, longCommandMs: 10_000 });
+    a.openWindow(window());
+    clock = 100;
+    a.closeWindow('call-1');
+    a.setWindows(1500, 50); // now anything > 50ms is ambiguous
+    clock = 200;
+    expect(a.classify(clock)).toMatchObject({ confidence: 'ambiguous-external' });
+  });
+
   it('prunes windows past their coverage', () => {
     const a = new Attributor({ now, windowGraceMs: 100 });
     a.openWindow(window());

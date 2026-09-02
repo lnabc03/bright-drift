@@ -8,7 +8,7 @@ import { DEFAULT_MAX_ENTRIES } from './types.js';
  */
 export class AgentKnowledgeBase {
   private entries = new Map<string, AKBEntry>();
-  private readonly maxEntries: number;
+  private maxEntries: number;
 
   constructor(options: AKBOptions = {}) {
     this.maxEntries = options.maxEntries ?? DEFAULT_MAX_ENTRIES;
@@ -30,6 +30,16 @@ export class AgentKnowledgeBase {
   set(path: string, entry: AKBEntry): void {
     this.entries.delete(path); // refresh insertion order
     this.entries.set(path, entry);
+    this.evictIfNeeded();
+  }
+
+  /** Update the capacity and immediately evict down to it (settings hot-update). */
+  setMaxEntries(maxEntries: number): void {
+    this.maxEntries = maxEntries;
+    this.evictIfNeeded();
+  }
+
+  private evictIfNeeded(): void {
     while (this.entries.size > this.maxEntries) {
       let oldestPath: string | undefined;
       let oldestAt = Number.POSITIVE_INFINITY;

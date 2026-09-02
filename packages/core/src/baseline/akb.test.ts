@@ -34,6 +34,18 @@ describe('AgentKnowledgeBase', () => {
     expect(akb.size).toBe(2);
   });
 
+  it('setMaxEntries shrinks capacity and evicts immediately (settings hot-update)', () => {
+    const akb = new AgentKnowledgeBase({ maxEntries: 10 });
+    akb.set('a.ts', entry({ updatedAt: 1 }));
+    akb.set('b.ts', entry({ updatedAt: 2 }));
+    akb.set('c.ts', entry({ updatedAt: 3 }));
+    akb.setMaxEntries(2);
+    expect(akb.size).toBe(2);
+    expect(akb.has('a.ts')).toBe(false); // oldest evicted
+    expect(akb.has('b.ts')).toBe(true);
+    expect(akb.has('c.ts')).toBe(true);
+  });
+
   it('markKnownDeleted keeps the entry', () => {
     const akb = new AgentKnowledgeBase();
     akb.set('a.ts', entry());
