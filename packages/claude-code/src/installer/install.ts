@@ -146,8 +146,13 @@ function cliPath(): string {
 
 export function buildSlashCommands(): Record<string, string> {
   const cli = cliPath();
+  // Custom slash commands are prompt templates — CC has no client-side-only
+  // command type, so the bang output always reaches the model. The trailing
+  // instruction keeps the round-trip terse: relay verbatim, no commentary.
+  const RELAY =
+    '\n上面的 Bash 输出就是命令的完整结果。请原样转述给用户，不要添加解释、评论或后续动作。';
   const md = (description: string, body: string): string =>
-    `---\ndescription: ${description}\nallowed-tools: Bash(node *)\n---\n${body}\n`;
+    `---\ndescription: ${description}\nallowed-tools: Bash(node *)\n---\n${body}\n${RELAY}\n`;
   return {
     'status.md': md(
       'bright-drift workspace status (daemon, sessions, pending drift)',

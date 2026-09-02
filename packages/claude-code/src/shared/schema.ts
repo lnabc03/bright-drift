@@ -69,6 +69,13 @@ export interface PendingInjection {
   text: string;
   /** Channels that already delivered this batch ('user-prompt-submit' | 'stop'). */
   deliveredVia: string[];
+  /**
+   * Queue stamp (DriftQueue.lastPushAt) captured when this batch was
+   * rendered. The daemon re-renders an undelivered batch whenever the queue
+   * has newer drift than the stamp, so a staged batch always absorbs later
+   * edits instead of freezing at first render (smoke test 2026-09-02).
+   */
+  queueStamp?: number;
 }
 
 /** workspace.json — daemon identity for idempotent launch (§5.2.1). */
