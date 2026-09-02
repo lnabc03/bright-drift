@@ -136,6 +136,23 @@ bright-drift:
 
 Per-project override: `<workspace>/.dsh/bright-drift.yml` (same shape, project wins).
 
+## Install (Claude Code, phase 2)
+
+```bash
+npx bright-drift-claude-code install            # user-level ~/.claude/settings.json
+npx bright-drift-claude-code install --project  # this repo's .claude/settings.json only
+npx bright-drift-claude-code uninstall          # remove (state kept; --purge deletes)
+```
+
+The installer **merges** hooks into settings.json (never overwrites existing entries) and installs the `/bright-drift:status|pause|resume|nodiff` slash commands. **CLI only** — Claude Code Desktop / Agent SDK / VS Code do not load hooks ([#87657](https://github.com/anthropics/claude-code/issues/87657), unfixed).
+
+Complementary to built-in CC defenses, not a duplicate:
+
+- **FileStateCache** is a write-time optimistic lock (`File has been modified since read`) — it stops the agent from clobbering your edits, but the agent never learns *that* the file changed or disappeared.
+- **bright-drift** fills the awareness gap: deletion/rename detection, drift on files the agent only read, line-level diffs, proactive turn-boundary notices with attribution.
+
+The architecture differs from phase 1: hooks are short-lived processes; watching is done by one detached daemon per workspace (idles out after 30 min), with all state as plain JSON under `~/.claude/state/bright-drift/`. Injection goes via UserPromptSubmit (main channel) plus Stop (high-priority batches only, at most once per batch).
+
 ## How it works
 
 ```
@@ -157,16 +174,19 @@ The engine (`bright-drift-core`) is platform-independent: no dsh imports, fully 
 ```
 packages/
   core/            # bright-drift-core — platform-independent engine
-  dsh-adapter/     # bright-drift — the dsh plugin
+  dsh-adapter/     # bright-drift — the dsh plugin (phase 1)
+  claude-code/     # bright-drift-claude-code — Claude Code hooks + daemon (phase 2)
 bright-drift-PRD.md               # product definition (Chinese)
 bright-drift-design-phase1.md     # phase-1 technical design (Chinese, source of truth)
+bright-drift-design-phase2.md     # phase-2 technical design (Chinese)
+bright-drift-phase2-research.md   # phase-2 research report (spike measurements)
 AGENTS.md                         # contributor/agent conventions
 ```
 
 ## Status & roadmap
 
-- **Phase 1 (this repo, current)**: dsh adapter — M0 runtime verification ✅, M1 core engine ✅, M2 dsh integration ✅ (E2E-verified on a headless profile), M3 polish.
-- **Phase 2**: Claude Code adapter (the serializable attribution state machine is designed for its daemon hand-off).
+- **Phase 1**: dsh adapter — M0 runtime verification ✅, M1 core engine ✅, M2 dsh integration ✅ (E2E-verified on a headless profile), M3 polish.
+- **Phase 2 (this repo, current)**: Claude Code adapter — M4 skeleton ✅, M5 feature parity ✅ (P2-T1/T2/T3/T7 e2e-verified), M6 polish & release.
 - **Phase 3**: Codex / opencode, as demand warrants.
 
 Core APIs are experimental until v1.0.

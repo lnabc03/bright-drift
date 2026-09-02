@@ -128,6 +128,57 @@ export function settingsPathFor(opts: InstallOptions): string {
     : path.join(claudeConfigDir(), 'settings.json');
 }
 
+/**
+ * Slash commands (design §5.10): markdown files under
+ * <claude>/commands/bright-drift/ — user-level by default, project-level with
+ * --project. Each body is a single inline `!` execution of the bundled cli.
+ */
+export function commandsDirFor(opts: InstallOptions): string {
+  return opts.project
+    ? path.join(process.cwd(), '.claude', 'commands', 'bright-drift')
+    : path.join(claudeConfigDir(), 'commands', 'bright-drift');
+}
+
+/** Forward-slash the cli path: the md bodies are read on every platform. */
+function cliPath(): string {
+  return path.join(hooksDir(), '..', 'cli.js').replaceAll('\\', '/');
+}
+
+export function buildSlashCommands(): Record<string, string> {
+  const cli = cliPath();
+  const md = (description: string, body: string): string =>
+    `---\ndescription: ${description}\nallowed-tools: Bash(node *)\n---\n${body}\n`;
+  return {
+    'status.md': md(
+      'bright-drift workspace status (daemon, sessions, pending drift)',
+      `!\`node "${cli}" status\``,
+    ),
+    'pause.md': md(
+      'Pause drift injection for this workspace (monitoring continues)',
+      `!\`node "${cli}" pause\``,
+    ),
+    'resume.md': md(
+      'Resume drift injection; accumulated drift arrives in one batch',
+      `!\`node "${cli}" resume\``,
+    ),
+    'nodiff.md': md(
+      'Suppress line-level diffs for paths matching the given glob(s)',
+      `!\`node "${cli}" nodiff $ARGUMENTS\``,
+    ),
+  };
+}
+
+async function writeSlashCommands(dir: string): Promise<void> {
+  await fs.mkdir(dir, { recursive: true });
+  for (const [name, content] of Object.entries(buildSlashCommands())) {
+    await atomicWriteFile(path.join(dir, name), content);
+  }
+}
+
+async function removeSlashCommands(dir: string): Promise<void> {
+  await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
+}
+
 async function readSettings(file: string): Promise<Settings> {
   return (await readJsonFile<Settings>(file)) ?? {};
 }
@@ -159,6 +210,7 @@ export async function install(opts: InstallOptions): Promise<{ settingsPath: str
   const settings = await readSettings(settingsPath);
   mergeHooks(settings, buildHookEntries(dir));
   await atomicWriteFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
+  await writeSlashCommands(commandsDirFor(opts));
 
   const stamp: InstallInfo = {
     version: SCHEMA_VERSION,
@@ -206,6 +258,7 @@ export async function uninstall(opts: UninstallOptions): Promise<{ settingsPath:
   const settings = await readSettings(settingsPath);
   removeOwnHooks(settings);
   await atomicWriteFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
+  await removeSlashCommands(commandsDirFor(opts));
   if (opts.purge) {
     await fs.rm(stateRoot(), { recursive: true, force: true }).catch(() => {});
   }

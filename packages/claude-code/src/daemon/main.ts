@@ -62,8 +62,9 @@ async function pollMailboxes(): Promise<void> {
       }
     }
   }
-  // Config hot-reload rides the same tick (mtime poll, §5.8).
+  // Config + pause hot-reload ride the same tick (mtime/stat polls, §5.8/§5.10).
   await engine.pollConfig().catch(() => {});
+  await engine.pollPaused().catch(() => {});
 }
 
 /**
