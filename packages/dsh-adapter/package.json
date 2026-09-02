@@ -1,6 +1,6 @@
 {
   "name": "bright-drift",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Workspace drift awareness for DeepSeek Harness agents: detects external/user file changes and injects them into the agent context at step boundaries.",
   "license": "MIT",
   "type": "module",
