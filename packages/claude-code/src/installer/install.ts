@@ -158,6 +158,10 @@ export function buildSlashCommands(): Record<string, string> {
       'bright-drift workspace status (daemon, sessions, pending drift)',
       `!\`node "${cli}" status\``,
     ),
+    'diff.md': md(
+      'Diff a workspace file against the last delivered baseline',
+      `!\`node "${cli}" diff $ARGUMENTS\``,
+    ),
     'pause.md': md(
       'Pause drift injection for this workspace (monitoring continues)',
       `!\`node "${cli}" pause\``,
@@ -209,7 +213,9 @@ export function selfcheck(dir: string): { ok: boolean; detail: string } {
   }
 }
 
-export async function install(opts: InstallOptions): Promise<{ settingsPath: string }> {
+export async function install(
+  opts: InstallOptions,
+): Promise<{ settingsPath: string; stoppedDaemons: number }> {
   const dir = hooksDir();
   const settingsPath = settingsPathFor(opts);
   const settings = await readSettings(settingsPath);
@@ -224,7 +230,13 @@ export async function install(opts: InstallOptions): Promise<{ settingsPath: str
     settingsTarget: settingsPath,
   };
   await atomicWriteFile(installFile(), JSON.stringify(stamp));
-  return { settingsPath };
+  // Upgrades: hooks are short-lived and pick up the new lib/ on their next
+  // invocation, but a RUNNING daemon holds the old code in memory and
+  // ensureDaemon would idempotently reuse it — stop all daemons so the next
+  // SessionStart launches the freshly installed build (smoke test 2026-09-02:
+  // fixes appeared not to work until daemons were killed by hand).
+  const stoppedDaemons = await stopDaemons();
+  return { settingsPath, stoppedDaemons };
 }
 
 export interface UninstallOptions extends InstallOptions {

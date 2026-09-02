@@ -87,12 +87,66 @@ describe('status', () => {
   });
 });
 
+describe('diff (phase-1 parity)', () => {
+  async function seedAkb(baseline: string): Promise<void> {
+    const { wsHash } = await import('../shared/paths.js');
+    const { createHash } = await import('node:crypto');
+    const hash = await wsHash(dir);
+    const ref = createHash('sha1').update(baseline).digest('hex');
+    const akbDir = path.join(dir, 'state', 'workspaces', hash, 'akb', 's1');
+    await fs.mkdir(path.join(akbDir, 'blobs', ref.slice(0, 2)), { recursive: true });
+    await fs.writeFile(path.join(akbDir, 'blobs', ref.slice(0, 2), ref), baseline);
+    await fs.writeFile(
+      path.join(akbDir, 'state.json'),
+      JSON.stringify({
+        version: 1,
+        akb: {
+          version: 1,
+          sessionId: 's1',
+          savedAt: Date.now(),
+          entries: {
+            'a.txt': {
+              contentHash: ref,
+              contentRef: ref,
+              mtimeMs: 1,
+              size: baseline.length,
+              source: 'read',
+              updatedAt: 1,
+            },
+          },
+        },
+        attributor: { windows: [] },
+      }),
+    );
+  }
+
+  it('prints a unified diff against the persisted baseline', async () => {
+    await seedAkb('line1\nline2\n');
+    await fs.writeFile(path.join(dir, 'a.txt'), 'line1\nline2 CHANGED\n');
+    const { cmdDiff } = await import('../cli-commands.js');
+    const { code, out } = await capture(() => cmdDiff('a.txt'));
+    expect(code).toBe(0);
+    expect(out).toContain('a.txt');
+    expect(out).toContain('+line2 CHANGED');
+    expect(out).toContain('-line2');
+  });
+
+  it('reports no drift when disk matches the baseline, and untracked files', async () => {
+    await seedAkb('same\n');
+    await fs.writeFile(path.join(dir, 'a.txt'), 'same\n');
+    const { cmdDiff } = await import('../cli-commands.js');
+    expect((await capture(() => cmdDiff('a.txt'))).out).toContain('no drift');
+    expect((await capture(() => cmdDiff('other.txt'))).out).toContain('not tracked');
+    expect((await capture(() => cmdDiff(undefined))).code).toBe(1);
+  });
+});
+
 describe('slash commands (§5.10)', () => {
-  it('install writes four command markdown files, uninstall removes them', async () => {
+  it('install writes five command markdown files, uninstall removes them', async () => {
     await install({ settingsPath: path.join(dir, 'settings.json') });
     const dirCmds = path.join(dir, 'claude-home', 'commands', 'bright-drift');
     const names = (await fs.readdir(dirCmds)).sort();
-    expect(names).toEqual(['nodiff.md', 'pause.md', 'resume.md', 'status.md']);
+    expect(names).toEqual(['diff.md', 'nodiff.md', 'pause.md', 'resume.md', 'status.md']);
     const status = await fs.readFile(dirCmds + '/status.md', 'utf8');
     expect(status).toContain('allowed-tools: Bash(node *)');
     expect(status).toContain('cli.js" status');
