@@ -1,7 +1,7 @@
 import { ContentStore } from 'bright-drift-core';
 import type { CtxLike, AgentLike, SettingsServiceLike, CommandsServiceLike, TimerServiceLike, FsServiceLike, SystemPromptLike } from './types.js';
 import { ConfigResolver, DEFAULT_CONFIG, settingsSchema } from './config.js';
-import { StateRegistry, type AgentState } from './state.js';
+import { StateRegistry, reconfigureState, type AgentState } from './state.js';
 import { WatchRegistry } from './watchers.js';
 import { handleWatchBatch } from './pipeline.js';
 import {
@@ -49,6 +49,44 @@ export function apply(ctx: CtxLike): void {
   });
   const shellToolName: 'bash' | 'pwsh' = process.platform === 'win32' ? 'pwsh' : 'bash';
 
+  // ---- Shared watcher attach/release (§5.3, enabled-gated) ----
+  // The watcher is refcounted per root; each session holds one refcount via
+  // `state.watcherAttached`. `enabled` toggles (settings hot-update or
+  // project override) acquire/release that ref without disturbing siblings.
+  const attachWatcher = (state: AgentState): void => {
+    if (state.watcherAttached) return;
+    state.watcherAttached = true;
+    const config = resolver.resolve(state.workspaceRoot);
+    void watchers
+      .acquire(state.workspaceRoot, config, (r, events) =>
+        handleWatchBatch(r, events, registry.statesForRoot(r), {
+          resolver,
+          logger,
+          onOverrideReload: (root, rootStates) => {
+            for (const s of rootStates) {
+              reconfigureState(s, resolver.resolve(root));
+              syncWatcher(s);
+            }
+          },
+        }),
+      )
+      .catch((e) => {
+        state.watcherAttached = false;
+        logger.error('watcher.acquire', e, { root: state.workspaceRoot });
+      });
+  };
+
+  const syncWatcher = (state: AgentState): void => {
+    const config = resolver.resolve(state.workspaceRoot);
+    if (config.enabled && !state.watcherAttached) attachWatcher(state);
+    else if (!config.enabled && state.watcherAttached) {
+      state.watcherAttached = false;
+      void watchers
+        .release(state.workspaceRoot)
+        .catch((e) => logger.error('watcher.release', e, { root: state.workspaceRoot }));
+    }
+  };
+
   // ---- System-prompt section (§5.5.6): static notice-semantics legend ----
   // Re-assembled before every model step, so it survives compaction/resume.
   // Toggled live by the GLOBAL settings value only (project override N/A).
@@ -91,6 +129,12 @@ export function apply(ctx: CtxLike): void {
         resolver.setGlobal(next);
         promptSectionEnabled = resolver.globalConfig().inject.promptSection;
         syncPromptSection();
+        // Hot-apply live fields (AKB capacity, attribution windows) and
+        // honor `enabled` toggles by attaching/releasing watchers (§5.9).
+        for (const state of registry.all()) {
+          reconfigureState(state, resolver.resolve(state.workspaceRoot));
+          syncWatcher(state);
+        }
       };
       applyResolved(scope.get());
       scope.watch(applyResolved);
@@ -127,18 +171,26 @@ export function apply(ctx: CtxLike): void {
       const root = rootFor(payload.agent);
       const config = resolver.resolve(root);
       const state = registry.getOrCreate(payload.agent, root, config);
-      void resolver.reloadOverride(root).catch((e) => logger.error('config.reload', e, { root }));
-      void watchers
-        .acquire(root, config, (r, events) =>
-          handleWatchBatch(r, events, registry.statesForRoot(r), { resolver, logger }),
-        )
-        .catch((e) => logger.error('watcher.acquire', e, { root }));
+      syncWatcher(state);
+      // Project override may flip `enabled` or the attribution windows; once
+      // loaded, re-apply live config and re-sync the watcher (D2, §5.9).
+      void resolver
+        .reloadOverride(root)
+        .then(() => {
+          reconfigureState(state, resolver.resolve(root));
+          syncWatcher(state);
+        })
+        .catch((e) => logger.error('config.reload', e, { root }));
 
       // Cold-start reconciliation for resumed sessions (§5.5.5, T7/E11).
-      if (payload.source === 'resume' && config.baseline.persist) {
+      if (payload.source === 'resume' && config.enabled && config.baseline.persist) {
         void (async () => {
           const loaded = await loadAgentState(state, logger);
-          if (loaded && config.inject.onSessionStart) {
+          if (!loaded) return;
+          // Restored engine objects use construction defaults; re-apply the
+          // current config so AKB capacity and attribution windows survive resume.
+          reconfigureState(state, resolver.resolve(root));
+          if (config.inject.onSessionStart) {
             await reconcileOnStart(state, resolver.resolve(root), logger);
           }
         })().catch((e) => logger.error('session-start.reconcile', e, { sessionId: state.sessionId }));
@@ -166,7 +218,10 @@ export function apply(ctx: CtxLike): void {
       if (!state) return;
       void (async () => {
         await saveAgentState(state, logger); // final persist; AKB json kept for resume
-        await watchers.release(state.workspaceRoot);
+        if (state.watcherAttached) {
+          state.watcherAttached = false;
+          await watchers.release(state.workspaceRoot);
+        }
         resolver.drop(state.workspaceRoot);
         registry.remove(state);
         logger.log('session.disposed', { sessionId: state.sessionId });

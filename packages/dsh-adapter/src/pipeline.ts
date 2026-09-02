@@ -18,6 +18,8 @@ export interface AttributedDrift extends DriftRecord {
 export interface PipelineDeps {
   resolver: ConfigResolver;
   logger: Logger;
+  /** Invoked after a project-override reload so live config re-applies (hot-update). */
+  onOverrideReload?: (root: string, states: AgentState[]) => void;
 }
 
 /**
@@ -34,6 +36,7 @@ export async function handleWatchBatch(
   // Project-override file changes hot-reload config for this root (D2).
   if (events.some((e) => e.path === PROJECT_OVERRIDE_REL)) {
     await deps.resolver.reloadOverride(root).catch((e) => deps.logger.error('config.reload', e, { root }));
+    deps.onOverrideReload?.(root, states);
   }
 
   // Probe each path once; reuse the observation across all sessions on this root.

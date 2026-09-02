@@ -199,6 +199,15 @@ export function makePostExecuteListener(deps: ObserveDeps) {
 /**
  * fs/observed auxiliary channel (§5.2.3): MUST be synchronous and never throw.
  * Only synchronous bookkeeping here — `absent` marks knownDeleted immediately.
+ *
+ * `present.version` is intentionally NOT consumed: the design's suggested
+ * "version unchanged → skip re-read" short-circuit would require storing dsh's
+ * opaque version token in the AKB (a schema addition), yet our baseline is
+ * content-hash based and established by a direct node fs re-read (§5.2.1),
+ * which is both cheap and deliberately independent of the dsh fs service —
+ * the latter must not be refreshed, or it would wash out the write-guard's
+ * version (§5.2.3). The short-circuit is an optional micro-optimization with
+ * real write-guard-interaction risk, so phase 1 opts out.
  */
 export function makeFsObservedListener(deps: ObserveDeps) {
   return (target: FsTargetLike, observation: FsObservationLike, actor: unknown): void => {

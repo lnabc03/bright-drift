@@ -20,6 +20,8 @@ export interface AgentState {
   /** §5.5.3 closing-suppression flag: set on tools/result, cleared per pre-step. */
   toolsRanSinceLastStep: boolean;
   paused: boolean;
+  /** True while this session holds a refcount on the shared workspace watcher. */
+  watcherAttached: boolean;
   stats: {
     injections: number;
     tokensInjected: number;
@@ -41,8 +43,22 @@ export function createAgentState(agent: AgentLike, workspaceRoot: string, config
     memoryCache: new MemoryContentCache(),
     toolsRanSinceLastStep: false,
     paused: false,
+    watcherAttached: false,
     stats: { injections: 0, tokensInjected: 0, driftEvents: 0 },
   };
+}
+
+/**
+ * Re-apply live config to a state's long-lived engine objects. The AKB
+ * capacity and attribution windows are captured at construction; settings
+ * hot-update and resume-restore both need this to take effect (§5.9).
+ */
+export function reconfigureState(state: AgentState, config: BrightDriftConfig): void {
+  state.akb.setMaxEntries(config.baseline.maxEntries);
+  state.attributor.setWindows(
+    config.attribution.bashWindowGraceMs,
+    config.attribution.longCommandMs,
+  );
 }
 
 /** Process-wide registry (single host plugin instance, D1). */
