@@ -220,7 +220,9 @@ export async function maybeRenderPending(
     }
   }
   state.queue.commitRendered(peeked); // rendered + dropped retire together (E19)
-  void saveSessionState(hash, state);
+  // Awaited (not fire-and-forget) so shutdown/test cleanup never races the
+  // snapshot write (CI hit ENOTEMPTY on Linux otherwise).
+  await saveSessionState(hash, state);
 
   await log(
     `rendered ${state.sessionId} batch=${pending.batchId} files=${records.length} ` +
