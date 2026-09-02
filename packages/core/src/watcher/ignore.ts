@@ -65,3 +65,15 @@ export async function createIgnoreMatcher(
     return matcher.ignores(relPath);
   };
 }
+
+/**
+ * Build a matcher over bare gitignore-style patterns only — no built-in
+ * table, no .gitignore read (D9 diff blacklist). Empty pattern list yields
+ * a matcher that never matches.
+ */
+export function createPatternMatcher(patterns: string[]): (relPath: string) => boolean {
+  if (patterns.length === 0) return () => false;
+  const matcher: Ignore = createIgnore();
+  matcher.add(patterns);
+  return (relPath: string) => relPath !== '' && matcher.ignores(relPath);
+}

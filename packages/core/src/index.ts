@@ -16,7 +16,7 @@ export type {
   DebounceTrigger,
   DebounceFactory,
 } from './watcher/watcher.js';
-export { createIgnoreMatcher, BUILTIN_IGNORE } from './watcher/ignore.js';
+export { createIgnoreMatcher, createPatternMatcher, BUILTIN_IGNORE } from './watcher/ignore.js';
 export { resolveGitTracked } from './watcher/git.js';
 export type { TrackedStatus } from './watcher/git.js';
 

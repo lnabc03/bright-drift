@@ -66,12 +66,19 @@ export async function revalidateRecords<T extends DriftRecord>(
       continue;
     }
     const entry = baseline.get(record.path);
-    const refresh = (r: T): T => ({
-      ...r,
-      ...(obs.contentHash !== undefined ? { contentHash: obs.contentHash } : {}),
-      ...(obs.mtimeMs !== undefined ? { mtimeMs: obs.mtimeMs } : {}),
-      ...(obs.size !== undefined ? { size: obs.size } : {}),
-    });
+    const refresh = (r: T): T => {
+      const out: T = {
+        ...r,
+        ...(obs.contentHash !== undefined ? { contentHash: obs.contentHash } : {}),
+        ...(obs.mtimeMs !== undefined ? { mtimeMs: obs.mtimeMs } : {}),
+        ...(obs.size !== undefined ? { size: obs.size } : {}),
+      };
+      // D9: the suppression marker tracks the config at render time —
+      // a path blacklisted after enqueue is still annotated (and vice versa).
+      if (obs.contentSuppressed === true) out.diffSuppressed = true;
+      else delete out.diffSuppressed;
+      return out;
+    };
 
     switch (record.kind) {
       case 'created':

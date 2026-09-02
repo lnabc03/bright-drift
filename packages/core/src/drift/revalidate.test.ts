@@ -104,4 +104,21 @@ describe('revalidateRecords (E19)', () => {
     );
     expect(calls).toBe(2);
   });
+
+  it('D9: the suppression marker tracks the fresh probe (set and cleared)', async () => {
+    const baseline = { get: () => ({ contentHash: 'h:old' }) };
+    const suppressedProbe = async (p: string): Promise<FileObservation> =>
+      ({ path: p, exists: true, contentHash: 'h:new', contentSuppressed: true });
+    const r1 = await revalidateRecords([rec('modified', 'secret.env')], suppressedProbe, baseline);
+    expect(r1.keep[0]).toMatchObject({ diffSuppressed: true });
+
+    const plainProbe = async (p: string): Promise<FileObservation> =>
+      ({ path: p, exists: true, contentHash: 'h:new' });
+    const r2 = await revalidateRecords(
+      [rec('modified', 'secret.env', { diffSuppressed: true })],
+      plainProbe,
+      baseline,
+    );
+    expect(r2.keep[0]).not.toHaveProperty('diffSuppressed');
+  });
 });

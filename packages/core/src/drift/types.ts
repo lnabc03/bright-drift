@@ -17,6 +17,12 @@ export interface DriftRecord {
    * evicted blobs (E18), binary and oversized files.
    */
   contentAvailable: boolean;
+  /**
+   * Diff deliberately suppressed by the user-configured diff blacklist
+   * (D9): the probe ran hash-only, so no line-level diff exists by policy.
+   * Renderers annotate this explicitly instead of looking like a failure.
+   */
+  diffSuppressed?: boolean;
   binary?: boolean;
   tooLarge?: boolean;
   mtimeMs?: number;
@@ -37,4 +43,9 @@ export interface FileObservation {
   size?: number;
   binary?: boolean;
   tooLarge?: boolean;
+  /**
+   * Probe ran hash-only because the path matches the diff blacklist (D9):
+   * the hash is exact, but content was deliberately not captured.
+   */
+  contentSuppressed?: boolean;
 }

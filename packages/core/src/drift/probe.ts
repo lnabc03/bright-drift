@@ -7,6 +7,11 @@ import type { FileObservation } from './types.js';
 export interface ProbeOptions {
   /** Files larger than this (KB) are reported without hash/content (default 512, FR-4). */
   maxFileSizeKB?: number;
+  /**
+   * Diff-blacklisted path (D9): hash exactly but do not capture content —
+   * the buffer never enters the AKB, memory cache, or content store.
+   */
+  hashOnly?: boolean;
 }
 
 const DEFAULT_MAX_FILE_SIZE_KB = 512;
@@ -44,6 +49,11 @@ export async function probeFile(
       return { ...base, tooLarge: true };
     }
     const content = await fs.readFile(abs);
+    if (options.hashOnly) {
+      // D9: hash is exact (echo suppression still works), but the content
+      // buffer is discarded here and never reaches any store.
+      return { ...base, contentHash: sha1(content), contentSuppressed: true };
+    }
     return {
       ...base,
       content,

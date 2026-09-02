@@ -73,6 +73,8 @@ export function renderInjection(entries: RenderEntry[], options: RenderOptions =
     const { record, attribution, diff } = entry;
     const mode = plan.modes[i]!;
     const suffix = statSuffix(diff);
+    // D9: diff blacklisted — say so explicitly instead of looking broken.
+    const suppNote = record.diffSuppressed ? '（diff 已被 diff.blacklist 抑制）' : '';
 
     if (attribution.category === 'D') {
       formatted.push(`FORMATTED  ${record.path}（保存时自动格式化，仅空白差异）`);
@@ -92,14 +94,14 @@ export function renderInjection(entries: RenderEntry[], options: RenderOptions =
       lines.push(
         mode === 'diff' && diff
           ? `${record.path} (+${diff.added} -${diff.removed})\n${patchText(diff)}`
-          : `${record.path}${suffix}`,
+          : `${record.path}${suffix}${suppNote}`,
       );
       sideEffects.set(key, lines);
       return;
     }
 
     if (attribution.confidence === 'ambiguous-external') {
-      const lines = [`EXTERNAL·${kindLabel} (ambiguous-external)  ${record.path}${suffix}`];
+      const lines = [`EXTERNAL·${kindLabel} (ambiguous-external)  ${record.path}${suffix}${suppNote}`];
       if (mode === 'diff' && diff) lines.push(patchText(diff));
       const bg = attribution.background ? '（后台任务）' : '';
       lines.push(
@@ -120,7 +122,7 @@ export function renderInjection(entries: RenderEntry[], options: RenderOptions =
     if (record.kind === 'modified' && mode === 'list' && diff) {
       truncatedList.push(`${record.path} (+${diff.added} -${diff.removed})`);
     }
-    externalOther.push(`EXTERNAL·${kindLabel} (high confidence)  ${record.path}${suffix}`);
+    externalOther.push(`EXTERNAL·${kindLabel} (high confidence)  ${record.path}${suffix}${suppNote}`);
   });
 
   if (externalModified.length) sections.push(externalModified.join('\n\n'));

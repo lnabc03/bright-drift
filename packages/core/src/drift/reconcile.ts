@@ -63,7 +63,13 @@ export function reconcile(
           obs.content !== undefined &&
           !obs.binary &&
           !obs.tooLarge;
-        records.push({ ...base, kind: 'modified', contentAvailable });
+        records.push({
+          ...base,
+          kind: 'modified',
+          contentAvailable,
+          // D9: hash-only probe (diff blacklist) → file-level by policy.
+          ...(obs.contentSuppressed ? { diffSuppressed: true } : {}),
+        });
       }
     } else if (entry && !entry.knownDeleted) {
       // The baseline hash rides along so deleted+created pairs with

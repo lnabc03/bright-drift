@@ -43,6 +43,16 @@ describe('probeFile', () => {
     expect(obs.contentHash).toBeUndefined();
   });
 
+  it('hashOnly (D9): exact hash, but content is never captured', async () => {
+    await fs.writeFile(path.join(dir, 'secret.env'), 'TOKEN=abc');
+    const obs = await probeFile(dir, 'secret.env', { hashOnly: true });
+    expect(obs.exists).toBe(true);
+    expect(obs.contentHash).toBe(sha1('TOKEN=abc'));
+    expect(obs.content).toBeUndefined();
+    expect(obs.contentSuppressed).toBe(true);
+    expect(obs.binary).toBeUndefined();
+  });
+
   it('directories are not files', async () => {
     await fs.mkdir(path.join(dir, 'sub'));
     const obs = await probeFile(dir, 'sub');

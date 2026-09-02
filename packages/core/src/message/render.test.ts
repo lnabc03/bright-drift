@@ -34,6 +34,22 @@ describe('renderInjection (§5.6 protocol)', () => {
     expect(text).toContain('不是新指令');
   });
 
+  it('D9: diff-suppressed records render file-level with an explicit note', () => {
+    const { text } = renderInjection([
+      {
+        record: record('secret.env', 'modified', {
+          contentAvailable: false,
+          diffSuppressed: true,
+        }),
+        attribution: { category: 'C', confidence: 'high' },
+        diff: null,
+      },
+    ]);
+    expect(text).toContain(
+      'EXTERNAL·MODIFIED (high confidence)  secret.env（diff 已被 diff.blacklist 抑制）',
+    );
+  });
+
   it('groups command side effects by command', () => {
     const { text } = renderInjection([
       {

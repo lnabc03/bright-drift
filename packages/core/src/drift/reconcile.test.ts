@@ -115,4 +115,14 @@ describe('reconcile', () => {
     const [r2] = reconcile(akb, [obs('a.ts', { tooLarge: true })], NOW);
     expect(r2!.contentAvailable).toBe(false);
   });
+
+  it('D9: hash-only probe yields file-level modified with the diffSuppressed marker', () => {
+    const akb = akbWith('secret.env', { contentRef: 'hash-baseline' });
+    const [r] = reconcile(
+      akb,
+      [obs('secret.env', { content: undefined, contentSuppressed: true })],
+      NOW,
+    );
+    expect(r).toMatchObject({ kind: 'modified', contentAvailable: false, diffSuppressed: true });
+  });
 });

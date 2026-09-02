@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'node:fs';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
-import { createIgnoreMatcher, BUILTIN_IGNORE } from './ignore.js';
+import { createIgnoreMatcher, createPatternMatcher, BUILTIN_IGNORE } from './ignore.js';
 
 let dir: string;
 
@@ -45,5 +45,17 @@ describe('createIgnoreMatcher', () => {
     });
     expect(match('fixtures/sample.txt')).toBe(true);
     expect(match('src/a.ts')).toBe(false);
+  });
+});
+
+describe('createPatternMatcher (D9)', () => {
+  it('matches gitignore-style globs; empty list never matches', () => {
+    const match = createPatternMatcher(['*.env', 'locks/**', 'package-lock.json']);
+    expect(match('.env')).toBe(true);
+    expect(match('locks/a.lock')).toBe(true);
+    expect(match('package-lock.json')).toBe(true);
+    expect(match('src/index.ts')).toBe(false);
+    expect(createPatternMatcher([])('anything.ts')).toBe(false);
+    expect(match('')).toBe(false);
   });
 });
