@@ -125,6 +125,9 @@ bright-drift:
   watch:
     respectGitignore: true
     extraIgnore: []
+    includeUntracked: false    # report created drift for git-untracked files;
+                               # non-git workspaces report all; window-predicted
+                               # command outputs are always reported
 ```
 
 Per-project override: `<workspace>/.dsh/bright-drift.yml` (same shape, project wins).

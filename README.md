@@ -124,6 +124,8 @@ bright-drift:
   watch:
     respectGitignore: true
     extraIgnore: []
+    includeUntracked: false    # created 漂移是否覆盖 git 未追踪文件；
+                               # 非 git 工作区一律上报；命令预测写入的路径豁免
 ```
 
 项目级覆盖：`<workspace>/.dsh/bright-drift.yml`（同样结构，项目级优先）。
