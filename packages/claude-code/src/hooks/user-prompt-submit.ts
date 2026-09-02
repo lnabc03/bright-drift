@@ -21,7 +21,7 @@ async function main(input: Record<string, unknown>): Promise<void> {
   if (pending.deliveredVia.includes('user-prompt-submit')) return;
 
   emitAdditionalContext('UserPromptSubmit', pending.text);
-  await markDelivered(hash, ctx.sessionId, 'user-prompt-submit').catch(() => {});
+  await markDelivered(hash, ctx.sessionId, 'user-prompt-submit', pending.batchId).catch(() => {});
 }
 
 await runHook(main);

@@ -154,6 +154,35 @@ describe('drift pipeline (P2-T1/T2 at engine level)', () => {
     const third = await readPending();
     expect(third?.batchId).not.toBe(first?.batchId);
   });
+
+  it('accumulated edits render as ONE complete diff after delivery (smoke-test regression)', async () => {
+    // Reproduces the 2026-09-02 smoke-test bug: edit A renders batch 1, edit B
+    // lands while batch 1 is undelivered, and nothing re-renders after
+    // delivery — edit B was silently lost.
+    await fs.writeFile(path.join(ws, 'a.txt'), 'l1\nl2\nl3\n');
+    await observe('a.txt', 'read');
+
+    // Edit A (deletes a line) → rendered immediately.
+    await fs.writeFile(path.join(ws, 'a.txt'), 'l1\nl3\n');
+    await engine.handleWatchBatch([{ path: 'a.txt', kind: 'change' }]);
+    const batchA = await readPending();
+    expect(batchA?.text).toContain('-l2');
+
+    // Edit B (adds five lines) while batch A is still undelivered → queued.
+    await fs.writeFile(path.join(ws, 'a.txt'), 'l1\nl3\nn1\nn2\nn3\nn4\nn5\n');
+    await engine.handleWatchBatch([{ path: 'a.txt', kind: 'change' }]);
+    expect((await readPending())?.batchId).toBe(batchA?.batchId); // not overwritten
+
+    // Delivery of batch A must unblock the accumulated drift: the daemon's
+    // poll tick calls renderAll, producing batch B with the FULL diff
+    // (baseline = last delivered state, current disk content).
+    await consumePending();
+    await engine.renderSession('s1'); // what the daemon poll loop does
+    const batchB = await readPending();
+    expect(batchB?.batchId).not.toBe(batchA?.batchId);
+    expect(batchB?.text).toContain('+n5'); // edit B present
+    expect(batchB?.text).not.toContain('-l2'); // edit A NOT repeated (already delivered)
+  });
 });
 
 describe('char red line (P2-T8, E4)', () => {

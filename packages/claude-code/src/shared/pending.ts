@@ -19,17 +19,23 @@ export async function readPending(
 }
 
 /**
- * Record that a channel delivered the current batch. This is the hook's only
- * write on the hot path; a lost write merely risks one duplicate injection of
- * an idempotent fact-statement (§4.4).
+ * Record that a channel delivered a batch. This is the hook's only write on
+ * the hot path; a lost write merely risks one duplicate injection of an
+ * idempotent fact-statement (§4.4).
+ *
+ * The batchId guard closes a race: the daemon may render the NEXT batch over
+ * the file between the hook's read and this write — without the guard, the
+ * hook would mark a batch it never delivered as delivered, silently
+ * swallowing it (smoke-test 2026-09-02).
  */
 export async function markDelivered(
   hash: string,
   sessionId: string,
   channel: 'user-prompt-submit' | 'stop',
+  batchId: string,
 ): Promise<void> {
   const pending = await readPending(hash, sessionId);
-  if (!pending) return;
+  if (!pending || pending.batchId !== batchId) return;
   if (pending.deliveredVia.includes(channel)) return;
   await atomicWriteFile(
     pendingFile(hash, sessionId),

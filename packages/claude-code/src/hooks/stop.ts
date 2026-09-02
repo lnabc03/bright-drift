@@ -24,7 +24,7 @@ async function main(input: Record<string, unknown>): Promise<void> {
   if (pending.deliveredVia.length > 0) return; // at-most-once per batch
 
   emitAdditionalContext('Stop', pending.text);
-  await markDelivered(hash, ctx.sessionId, 'stop').catch(() => {});
+  await markDelivered(hash, ctx.sessionId, 'stop', pending.batchId).catch(() => {});
 }
 
 await runHook(main);
