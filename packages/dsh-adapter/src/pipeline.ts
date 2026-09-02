@@ -3,6 +3,7 @@ import {
   probeFile,
   makeCreatedFilter,
   resolveGitTracked,
+  createPatternMatcher,
   type Attribution,
   type DriftRecord,
   type FileObservation,
@@ -48,12 +49,17 @@ export async function handleWatchBatch(
   if (!config.enabled || states.length === 0) return;
 
   // Probe each path once; reuse the observation across all sessions on this root.
+  // D9: diff-blacklisted paths probe hash-only — content is never captured.
+  const diffBlacklisted = createPatternMatcher(config.diff.blacklist);
   const observations = new Map<string, FileObservation>();
   await Promise.all(
     events.map(async (e) => {
       observations.set(
         e.path,
-        await probeFile(root, e.path, { maxFileSizeKB: config.diff.maxFileSizeKB }),
+        await probeFile(root, e.path, {
+          maxFileSizeKB: config.diff.maxFileSizeKB,
+          hashOnly: diffBlacklisted(e.path),
+        }),
       );
     }),
   );

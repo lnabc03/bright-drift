@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   createFileDiff,
+  createPatternMatcher,
   estimateTokens,
   isCosmeticDiff,
   probeFile,
@@ -8,6 +9,7 @@ import {
   revalidateRecords,
   shouldInjectAtPreStep,
   withinFormatterWindow,
+  type FileObservation,
   type RenderEntry,
 } from 'bright-drift-core';
 import type { ContentStore } from 'bright-drift-core';
@@ -56,11 +58,15 @@ export async function buildInjection(
   // drops phantom creates (create→rename before injection), net-zero
   // modifications, and recreated-identical deletions. Dropped records
   // retire together with the rendered ones at the Sync Point below.
-  const { keep: records, dropped } = await revalidateRecords(
-    peeked,
-    (p) => probeFile(state.workspaceRoot, p, { maxFileSizeKB: config.diff.maxFileSizeKB }),
-    state.akb,
-  );
+  // D9: blacklisted paths re-probe hash-only; the suppression marker is
+  // refreshed to the config at render time.
+  const diffBlacklisted = createPatternMatcher(config.diff.blacklist);
+  const probe = (p: string): Promise<FileObservation> =>
+    probeFile(state.workspaceRoot, p, {
+      maxFileSizeKB: config.diff.maxFileSizeKB,
+      hashOnly: diffBlacklisted(p),
+    });
+  const { keep: records, dropped } = await revalidateRecords(peeked, probe, state.akb);
   if (dropped.length > 0) {
     deps.logger.log('inject.revalidated', {
       sessionId: state.sessionId,
@@ -81,9 +87,7 @@ export async function buildInjection(
 
     if (record.kind === 'modified' && record.contentAvailable) {
       const entry = state.akb.get(record.path);
-      const current = await probeFile(state.workspaceRoot, record.path, {
-        maxFileSizeKB: config.diff.maxFileSizeKB,
-      });
+      const current = await probe(record.path);
       const baseline = await loadBaselineContent(state, entry?.contentRef, deps);
       if (current.exists && current.content && baseline) {
         const oldText = baseline.toString('utf8');

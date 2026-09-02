@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import {
   analyzeCommand,
+  createPatternMatcher,
   probeFile,
   toRelativeKey,
   type SnapshotEntry,
@@ -53,7 +54,13 @@ async function updateBaseline(
   deps: ObserveDeps,
 ): Promise<void> {
   const config = deps.resolver.resolve(state.workspaceRoot);
-  const obs = await probeFile(state.workspaceRoot, rel, { maxFileSizeKB: config.diff.maxFileSizeKB });
+  // D9: diff-blacklisted paths probe hash-only — the baseline hash stays
+  // exact (echo suppression unaffected) but content is never captured.
+  const hashOnly = createPatternMatcher(config.diff.blacklist)(rel);
+  const obs = await probeFile(state.workspaceRoot, rel, {
+    maxFileSizeKB: config.diff.maxFileSizeKB,
+    hashOnly,
+  });
   if (!obs.exists || obs.contentHash === undefined) {
     state.akb.markKnownDeleted(rel, Date.now());
     deps.logger.log('baseline.known-deleted', { sessionId: state.sessionId, path: rel });

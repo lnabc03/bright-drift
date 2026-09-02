@@ -19,6 +19,8 @@ export interface BrightDriftConfig {
   diff: {
     contextLines: number;
     maxFileSizeKB: number;
+    /** D9: gitignore-style globs whose diffs are suppressed (hash-only probe). */
+    blacklist: string[];
   };
   baseline: {
     maxEntries: number;
@@ -49,7 +51,7 @@ export const DEFAULT_CONFIG: BrightDriftConfig = {
     maxInjectTokens: 2000,
     maxDriftFilesForDiff: 50,
   },
-  diff: { contextLines: 3, maxFileSizeKB: 512 },
+  diff: { contextLines: 3, maxFileSizeKB: 512, blacklist: [] },
   baseline: { maxEntries: 5000, persist: true, persistContent: true, contentStoreMaxMB: 256 },
   inject: { onSessionStart: true, onPreStep: true, promptSection: true },
   attribution: {

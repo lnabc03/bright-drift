@@ -185,4 +185,34 @@ describe('buildInjection end-to-end (FR-2/FR-3/FR-4 core loop)', () => {
     expect(text).not.toContain('mid.txt');
     expect(state.queue.isEmpty()).toBe(true); // dropped phantoms retired too
   });
+
+  it('D9: blacklisted file drifts file-level with an explicit note; content never stored', async () => {
+    resolver.setGlobal({ diff: { blacklist: ['secret.env'] } });
+    const config = resolver.resolve(ws);
+    await fs.writeFile(path.join(ws, 'secret.env'), 'TOKEN=old\n');
+    await establishBaseline('secret.env');
+    await fs.writeFile(path.join(ws, 'secret.env'), 'TOKEN=new\n');
+
+    await handleWatchBatch(ws, [{ path: 'secret.env', kind: 'change' }], registry.statesForRoot(ws), {
+      resolver,
+      logger,
+    });
+    expect(state.queue.size).toBe(1);
+    expect(state.queue.peek()[0]).toMatchObject({
+      kind: 'modified',
+      contentAvailable: false,
+      diffSuppressed: true,
+    });
+
+    const message = await buildInjection(state, config, deps());
+    const text = message!.content[0]!.text;
+    expect(text).toContain('secret.env');
+    expect(text).toContain('diff 已被 diff.blacklist 抑制');
+    expect(text).not.toContain('TOKEN=new');
+
+    // The new content never reached the content store (D9 hash-only probe).
+    expect(await contentStore.get(sha1('TOKEN=new\n'))).toBeNull();
+    // Baseline still advanced by hash: a same-content echo later is a no-op.
+    expect(state.akb.get('secret.env')?.contentHash).toBe(sha1('TOKEN=new\n'));
+  });
 });

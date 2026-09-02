@@ -37,6 +37,14 @@ describe('mergeConfig', () => {
     expect('unknownKey' in merged.budget).toBe(false);
   });
 
+  it('diff.blacklist defaults empty and merges as a string array (D9)', () => {
+    expect(DEFAULT_CONFIG.diff.blacklist).toEqual([]);
+    const merged = mergeConfig(DEFAULT_CONFIG, { diff: { blacklist: ['*.env', 'locks/**'] } } as never);
+    expect(merged.diff.blacklist).toEqual(['*.env', 'locks/**']);
+    const bad = mergeConfig(DEFAULT_CONFIG, { diff: { blacklist: [1, 2] } } as never);
+    expect(bad.diff.blacklist).toEqual([]);
+  });
+
   it('never mutates the base', () => {
     const before = structuredClone(DEFAULT_CONFIG);
     mergeConfig(DEFAULT_CONFIG, { enabled: false } as never);

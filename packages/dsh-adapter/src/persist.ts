@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import {
   AgentKnowledgeBase,
   Attributor,
+  createPatternMatcher,
   probeFile,
   reconcile,
   type AKBSnapshot,
@@ -69,8 +70,14 @@ export async function reconcileOnStart(
   try {
     const paths = state.akb.trackedPaths();
     if (paths.length === 0) return;
+    const diffBlacklisted = createPatternMatcher(config.diff.blacklist);
     const observations = await Promise.all(
-      paths.map((p) => probeFile(state.workspaceRoot, p, { maxFileSizeKB: config.diff.maxFileSizeKB })),
+      paths.map((p) =>
+        probeFile(state.workspaceRoot, p, {
+          maxFileSizeKB: config.diff.maxFileSizeKB,
+          hashOnly: diffBlacklisted(p), // D9
+        }),
+      ),
     );
     const now = Date.now();
     // Only AKB-tracked paths are probed here, so `created` records cannot
