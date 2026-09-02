@@ -59,8 +59,9 @@ jobs:
           TAG_VERSION="${GITHUB_REF_NAME#v}"
           CORE=$(node -p "require('./packages/core/package.json').version")
           ADAPTER=$(node -p "require('./packages/dsh-adapter/package.json').version")
-          if [ "$TAG_VERSION" != "$CORE" ] || [ "$TAG_VERSION" != "$ADAPTER" ]; then
-            echo "Tag $GITHUB_REF_NAME but core=$CORE adapter=$ADAPTER — bump both packages first."
+          CC=$(node -p "require('./packages/claude-code/package.json').version")
+          if [ "$TAG_VERSION" != "$CORE" ] || [ "$TAG_VERSION" != "$ADAPTER" ] || [ "$TAG_VERSION" != "$CC" ]; then
+            echo "Tag $GITHUB_REF_NAME but core=$CORE adapter=$ADAPTER claude-code=$CC — bump all packages first."
             exit 1
           fi
           git fetch origin main
@@ -69,7 +70,7 @@ jobs:
             exit 1
           fi
 
-      # Order matters: the adapter depends on bright-drift-core@<same version>.
+      # Order matters: adapters depend on bright-drift-core@<same version>.
       - name: Publish bright-drift-core
         run: pnpm --filter bright-drift-core publish --no-git-checks
         env:
@@ -77,6 +78,11 @@ jobs:
 
       - name: Publish bright-drift
         run: pnpm --filter bright-drift publish --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish bright-drift-claude-code
+        run: pnpm --filter bright-drift-claude-code publish --no-git-checks
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 

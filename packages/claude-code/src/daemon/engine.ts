@@ -97,6 +97,19 @@ export class WorkspaceEngine {
     }
   }
 
+  /** Pause-marker watch (§5.10): on resume, deliver the accumulated drift
+   *  of every session in one batch. */
+  private wasPaused = false;
+
+  async pollPaused(): Promise<void> {
+    const paused = await this.isPaused();
+    if (this.wasPaused && !paused) {
+      await log('resumed — rendering accumulated drift');
+      await this.renderAll();
+    }
+    this.wasPaused = paused;
+  }
+
   private async refreshIgnore(): Promise<void> {
     const config = this.config;
     this.ignored = await createIgnoreMatcher(this.workspaceRoot, {

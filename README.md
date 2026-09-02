@@ -134,6 +134,23 @@ bright-drift:
 
 项目级覆盖：`<workspace>/.dsh/bright-drift.yml`（同样结构，项目级优先）。
 
+## 安装（Claude Code，二期）
+
+```bash
+npx bright-drift-claude-code install            # 用户级 ~/.claude/settings.json
+npx bright-drift-claude-code install --project  # 仅当前仓库 .claude/settings.json
+npx bright-drift-claude-code uninstall          # 卸载（状态保留，--purge 才删除）
+```
+
+安装器把 hooks **合并**进 settings.json（绝不覆盖已有条目），并写入 `/bright-drift:status|pause|resume|nodiff` 斜杠命令。仅支持 **CLI 形态**——Claude Code 桌面端 / Agent SDK / VS Code 扩展不加载 hooks（#87657 未修）。
+
+与 CC 内置能力的关系（互补，不重复）：
+
+- **FileStateCache** 是写时乐观锁（`File has been modified since read` 硬阻塞）——防止 agent 覆盖你改过的文件，但 agent 并不知道「文件变了/没了」。
+- **bright-drift** 补认知缺口：删除/重命名感知、未读文件的漂移、行级 diff、外部修改在 turn 边界的主动告知与归因。
+
+架构与一期不同：hooks 是短命进程，监控由一个每工作区一个的 detached daemon 承担（空闲 30 分钟自退），全部状态在 `~/.claude/state/bright-drift/`（纯 JSON 文件，可直接查看）。注入走 UserPromptSubmit（主通道，用户发言轮）+ Stop（仅高优先级：AKB 文件被删除/重命名，每批次至多一次）。
+
 ## 工作原理
 
 ```
@@ -154,16 +171,19 @@ shell 调用 ──▶ FR-7 归因窗口（bash/pwsh，前台与后台）
 ```
 packages/
   core/            # bright-drift-core —— 平台无关引擎
-  dsh-adapter/     # bright-drift —— dsh 插件
+  dsh-adapter/     # bright-drift —— dsh 插件（一期）
+  claude-code/     # bright-drift-claude-code —— Claude Code hooks + daemon（二期）
 bright-drift-PRD.md               # 产品定义（中文）
 bright-drift-design-phase1.md     # 一期技术设计（中文，单一事实源）
+bright-drift-design-phase2.md     # 二期技术设计（中文）
+bright-drift-phase2-research.md   # 二期预研报告（spike 实测数据）
 AGENTS.md                         # 贡献者/agent 约定
 ```
 
 ## 状态与路线图
 
-- **一期（本仓库，当前）**：dsh adapter —— M0 运行时验证 ✅、M1 核心引擎 ✅、M2 dsh 集成 ✅（headless profile 上 E2E 验证通过）、M3 打磨。
-- **二期**：Claude Code adapter（可序列化的归因状态机正是为其 daemon 交接而设计）。
+- **一期**：dsh adapter —— M0 运行时验证 ✅、M1 核心引擎 ✅、M2 dsh 集成 ✅（headless profile 上 E2E 验证通过）、M3 打磨。
+- **二期（本仓库，当前）**：Claude Code adapter —— M4 骨架 ✅、M5 功能对齐 ✅（P2-T1/T2/T3/T7 e2e 实测通过）、M6 打磨发版。
 - **三期**：Codex / opencode，视需求而定。
 
 Core API 在 v1.0 前标记为 experimental。

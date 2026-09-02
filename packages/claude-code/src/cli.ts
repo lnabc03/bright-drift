@@ -1,9 +1,13 @@
 import { hooksDir, install, selfcheck, uninstall } from './installer/install.js';
+import { cmdNodiff, cmdPause, cmdResume, cmdStatus } from './cli-commands.js';
 
 /**
- * CLI entry (design §5.9):
+ * CLI entry (design §5.9/§5.10):
  *   bright-drift-claude-code install [--project]
  *   bright-drift-claude-code uninstall [--project] [--purge]
+ *   bright-drift-claude-code status
+ *   bright-drift-claude-code pause | resume
+ *   bright-drift-claude-code nodiff <glob> [...]
  */
 
 function usage(): void {
@@ -12,8 +16,12 @@ function usage(): void {
       'Usage:',
       '  bright-drift-claude-code install [--project]    Merge hooks into settings.json',
       '  bright-drift-claude-code uninstall [--project] [--purge]',
+      '  bright-drift-claude-code status                 Daemon/session/pending overview',
+      '  bright-drift-claude-code pause                  Pause injection (monitoring continues)',
+      '  bright-drift-claude-code resume                 Resume; accumulated drift is delivered',
+      '  bright-drift-claude-code nodiff <glob> [...]    Suppress diffs for paths (list only)',
       '',
-      '  --project   Target <cwd>/.claude/settings.json instead of the user settings',
+      '  --project   Target <cwd>/.claude/ instead of the user-level ~/.claude/',
       '  --purge     Also delete the state directory on uninstall',
     ].join('\n'),
   );
@@ -44,6 +52,14 @@ async function main(argv: string[]): Promise<number> {
       console.log(purge ? 'state directory deleted.' : `state kept at (use --purge to delete).`);
       return 0;
     }
+    case 'status':
+      return cmdStatus();
+    case 'pause':
+      return cmdPause();
+    case 'resume':
+      return cmdResume();
+    case 'nodiff':
+      return cmdNodiff(rest.filter((a) => !a.startsWith('--')));
     case undefined:
     case 'help':
     case '--help':
