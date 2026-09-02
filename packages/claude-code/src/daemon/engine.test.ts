@@ -136,52 +136,117 @@ describe('drift pipeline (P2-T1/T2 at engine level)', () => {
     expect(windows[0]!.command).toBe('make all');
   });
 
-  it('does not overwrite an undelivered pending batch', async () => {
+  it('re-renders an undelivered batch to absorb later drift (smoke test 2026-09-02)', async () => {
+    // Report §2.1: with the Sync Point at render time, an undelivered batch
+    // froze at first render and every notification lagged one version. Now
+    // the staged batch re-renders against the SAME (last-delivered) baseline.
     await fs.writeFile(path.join(ws, 'a.txt'), 'v1\n');
     await observe('a.txt', 'read');
     await fs.writeFile(path.join(ws, 'a.txt'), 'v2\n');
     await engine.handleWatchBatch([{ path: 'a.txt', kind: 'change' }]);
     const first = await readPending();
+    expect(first?.text).toContain('+v2');
 
+    await new Promise((r) => setTimeout(r, 5)); // keep queue stamps distinct
     await fs.writeFile(path.join(ws, 'a.txt'), 'v3\n');
     await engine.handleWatchBatch([{ path: 'a.txt', kind: 'change' }]);
     const second = await readPending();
-    expect(second?.batchId).toBe(first?.batchId); // unchanged until delivered
+    expect(second?.batchId).not.toBe(first?.batchId); // re-rendered in place
+    expect(second?.text).toContain('+v3');
+    expect(second?.text).not.toContain('+v2'); // merged: no intermediate state
 
-    // After delivery the accumulated drift renders as a fresh batch.
+    // Delivery commits the merged batch; the queue is empty → no re-render.
     await consumePending();
     await engine.renderSession('s1');
+    expect(engine.sessions.get('s1')!.queue.size).toBe(0); // retired on delivery
     const third = await readPending();
-    expect(third?.batchId).not.toBe(first?.batchId);
+    expect(third?.batchId).toBe(second?.batchId);
+    // …and the AKB baseline advanced to the delivered (v3) state.
+    await new Promise((r) => setTimeout(r, 5));
+    await fs.writeFile(path.join(ws, 'a.txt'), 'v4\n');
+    await engine.handleWatchBatch([{ path: 'a.txt', kind: 'change' }]);
+    const fourth = await readPending();
+    expect(fourth?.text).toContain('+v4');
+    expect(fourth?.text).not.toContain('+v3'); // v3 was the committed baseline
   });
 
-  it('accumulated edits render as ONE complete diff after delivery (smoke-test regression)', async () => {
-    // Reproduces the 2026-09-02 smoke-test bug: edit A renders batch 1, edit B
-    // lands while batch 1 is undelivered, and nothing re-renders after
-    // delivery — edit B was silently lost.
+  it('merges accumulated edits into the undelivered batch (smoke-test regression)', async () => {
+    // Reproduces the 2026-09-02 smoke-test bug directly: edit A renders,
+    // edit B lands while the batch is undelivered. Old behavior: batch A
+    // froze (only '-l2'), edit B waited for a post-delivery render and the
+    // intermediate batch was silently merged away. New: ONE merged batch.
     await fs.writeFile(path.join(ws, 'a.txt'), 'l1\nl2\nl3\n');
     await observe('a.txt', 'read');
 
-    // Edit A (deletes a line) → rendered immediately.
-    await fs.writeFile(path.join(ws, 'a.txt'), 'l1\nl3\n');
+    await fs.writeFile(path.join(ws, 'a.txt'), 'l1\nl3\n'); // edit A
     await engine.handleWatchBatch([{ path: 'a.txt', kind: 'change' }]);
     const batchA = await readPending();
     expect(batchA?.text).toContain('-l2');
 
-    // Edit B (adds five lines) while batch A is still undelivered → queued.
-    await fs.writeFile(path.join(ws, 'a.txt'), 'l1\nl3\nn1\nn2\nn3\nn4\nn5\n');
+    await new Promise((r) => setTimeout(r, 5));
+    await fs.writeFile(path.join(ws, 'a.txt'), 'l1\nl3\nn1\nn2\nn3\nn4\nn5\n'); // edit B
     await engine.handleWatchBatch([{ path: 'a.txt', kind: 'change' }]);
-    expect((await readPending())?.batchId).toBe(batchA?.batchId); // not overwritten
+    const merged = await readPending();
+    expect(merged?.batchId).not.toBe(batchA?.batchId);
+    expect(merged?.text).toContain('-l2'); // edit A still present
+    expect(merged?.text).toContain('+n5'); // edit B absorbed into the batch
+  });
 
-    // Delivery of batch A must unblock the accumulated drift: the daemon's
-    // poll tick calls renderAll, producing batch B with the FULL diff
-    // (baseline = last delivered state, current disk content).
-    await consumePending();
-    await engine.renderSession('s1'); // what the daemon poll loop does
-    const batchB = await readPending();
-    expect(batchB?.batchId).not.toBe(batchA?.batchId);
-    expect(batchB?.text).toContain('+n5'); // edit B present
-    expect(batchB?.text).not.toContain('-l2'); // edit A NOT repeated (already delivered)
+  it('delivery retires the queue — no Stop-channel replay loop (smoke 2026-09-03)', async () => {
+    // Reproduces the infinite replay: revalidateRecords returns refreshed
+    // COPIES, so identity-based retirement no-op'd and the delivered batch
+    // re-rendered (deliveredVia reset) after every commit.
+    await fs.writeFile(path.join(ws, 'r.txt'), 'v1\n');
+    await observe('r.txt', 'read');
+    await fs.rename(path.join(ws, 'r.txt'), path.join(ws, 'r2.txt'));
+    await engine.handleWatchBatch([
+      { path: 'r.txt', kind: 'unlink' },
+      { path: 'r2.txt', kind: 'add' },
+    ]);
+    const p = await readPending();
+    expect(p?.priority).toBe('high');
+
+    // The Stop hook delivers, then the poll tick observes it: the queue MUST
+    // empty and the pending file MUST NOT be re-rendered.
+    const delivered = await readPending();
+    delivered!.deliveredVia.push('stop');
+    await fs.writeFile(pendingFile(hash, 's1'), JSON.stringify(delivered));
+    await engine.renderSession('s1');
+    expect(engine.sessions.get('s1')!.queue.size).toBe(0);
+    const after = await readPending();
+    expect(after?.batchId).toBe(p!.batchId); // no re-render
+    expect(after?.deliveredVia).toEqual(['stop']); // still marked delivered
+  });
+
+  it('retracts an undelivered batch whose facts all went stale (report §2.3)', async () => {
+    // Create → quick delete before delivery: the staged CREATE must not be
+    // delivered for a file that no longer exists.
+    await fs.writeFile(path.join(ws, 'gone.txt'), 'x\n');
+    await engine.handleWatchBatch([{ path: 'gone.txt', kind: 'add' }]);
+    expect((await readPending())?.text).toContain('gone.txt');
+
+    await new Promise((r) => setTimeout(r, 5));
+    await fs.rm(path.join(ws, 'gone.txt'));
+    await engine.handleWatchBatch([{ path: 'gone.txt', kind: 'unlink' }]);
+    expect(await readPending()).toBeUndefined();
+  });
+
+  it('create → rename before delivery reports only the final name (report §2.3)', async () => {
+    await fs.writeFile(path.join(ws, 'new.txt'), 'hello\n');
+    await engine.handleWatchBatch([{ path: 'new.txt', kind: 'add' }]);
+    const created = await readPending();
+    expect(created?.text).toContain('new.txt');
+
+    await new Promise((r) => setTimeout(r, 5));
+    await fs.rename(path.join(ws, 'new.txt'), path.join(ws, 'final.txt'));
+    await engine.handleWatchBatch([
+      { path: 'new.txt', kind: 'unlink' },
+      { path: 'final.txt', kind: 'add' },
+    ]);
+    const p = await readPending();
+    expect(p?.batchId).not.toBe(created?.batchId);
+    expect(p?.text).toContain('final.txt');
+    expect(p?.text).not.toContain('new.txt'); // intermediate name never surfaces
   });
 });
 

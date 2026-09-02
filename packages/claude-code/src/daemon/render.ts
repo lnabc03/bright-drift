@@ -13,6 +13,7 @@ import {
   type FileObservation,
   type RenderEntry,
 } from 'bright-drift-core';
+import { promises as fs } from 'node:fs';
 import { atomicWriteFile, readJsonFile } from '../shared/atomic.js';
 import {
   MAX_INJECT_CHARS,
@@ -29,9 +30,16 @@ import type { AttributedDrift } from './types.js';
  * → budgeted line-level diffs → pre-rendered pending/<sid>.json. The hook
  * only ever reads the finished file; all computation happens here.
  *
- * Sync Point ordering: write pending FIRST, then commit the AKB and retire
- * the queue entries. A crash between the two re-detects the drift at the
- * next reconcile (duplicate fact notice) instead of silently swallowing it.
+ * Sync Point (moved 2026-09-02, smoke-test fix): render ONLY writes the
+ * pending file — the AKB commit and queue retirement happen when the daemon
+ * observes the batch's delivery (commitDeliveredBatch). An undelivered batch
+ * therefore stays re-renderable: drift arriving while a batch waits for a
+ * prompt is merged into a fresh render against the SAME baseline (the agent's
+ * last-delivered state), so the staged text always reflects the latest disk
+ * state instead of freezing at first render and lagging one version behind.
+ * Crash safety is preserved: pre-delivery crash leaves the AKB untouched, so
+ * cold-start reconcile re-detects the drift and re-renders (duplicate fact
+ * notice — the safe direction).
  */
 
 async function loadBaselineContent(
@@ -64,6 +72,81 @@ export interface RenderResult {
   chars?: number;
 }
 
+/**
+ * The moved Sync Point: a hook marked this batch delivered → commit its
+ * records to the AKB and retire them from the queue. Batch-id matching
+ * guards against a pending file the current daemon lifetime did not render
+ * (restart with a kept pending): such a batch is left for the cold-start
+ * reconcile to re-detect and re-render.
+ */
+async function commitDeliveredBatch(
+  hash: string,
+  state: SessionState,
+  pending: PendingInjection,
+): Promise<void> {
+  const rendered = state.lastRendered;
+  if (!rendered || rendered.batchId !== pending.batchId) return;
+
+  const now = Date.now();
+  for (const record of rendered.records) {
+    try {
+      switch (record.kind) {
+        case 'deleted':
+          state.akb.markKnownDeleted(record.path, now);
+          break;
+        case 'renamed': {
+          const from = record.fromPath;
+          const old = from ? state.akb.get(from) : undefined;
+          if (from) state.akb.delete(from);
+          if (old || record.contentHash) {
+            state.akb.set(record.path, {
+              contentHash: record.contentHash ?? old!.contentHash,
+              ...(old?.contentRef !== undefined ? { contentRef: old.contentRef } : {}),
+              mtimeMs: record.mtimeMs ?? now,
+              size: record.size ?? 0,
+              source: 'read',
+              updatedAt: now,
+            });
+          }
+          break;
+        }
+        case 'created':
+        case 'modified': {
+          // Content was already persisted under its hash at render time.
+          const contentRef = rendered.contentRefs.get(record.path);
+          if (record.contentHash) {
+            state.akb.set(record.path, {
+              contentHash: record.contentHash,
+              ...(contentRef !== undefined ? { contentRef } : {}),
+              mtimeMs: record.mtimeMs ?? now,
+              size: record.size ?? 0,
+              source: 'read',
+              ...(contentRef === undefined ? { partial: true } : {}),
+              updatedAt: now,
+            });
+          }
+          break;
+        }
+      }
+    } catch (err) {
+      await log(`commit ${state.sessionId} ${record.path}: ${(err as Error).message}`);
+    }
+  }
+  // Retire by enqueue stamp, NOT object identity: revalidateRecords returns
+  // refreshed copies, and identity-based retirement silently no-ops on them
+  // (the queue never emptied → Stop-channel replay loop, smoke 2026-09-03).
+  // Records re-pushed after this batch's render carry a later stamp and
+  // survive, rendering again with the fresh baseline.
+  state.queue.retireUpTo(pending.queueStamp ?? pending.renderedAt);
+  state.lastRendered = undefined;
+  // Awaited (not fire-and-forget) so shutdown/test cleanup never races the
+  // snapshot write (CI hit ENOTEMPTY on Linux otherwise).
+  await saveSessionState(hash, state);
+  await log(
+    `committed ${state.sessionId} batch=${pending.batchId} records=${rendered.records.length}`,
+  );
+}
+
 export async function maybeRenderPending(
   hash: string,
   state: SessionState,
@@ -72,18 +155,34 @@ export async function maybeRenderPending(
 ): Promise<RenderResult> {
   if (opts.paused || !config.enabled) return { wrote: false, reason: 'paused-or-disabled' };
 
-  // Never overwrite an undelivered batch; new drift accumulates in the queue
-  // and merges into the render that follows delivery (§4.4).
   const file = pendingFile(hash, state.sessionId);
   const existing = await readJsonFile<PendingInjection>(file);
-  if (existing && existing.deliveredVia.length === 0) {
-    return { wrote: false, reason: 'pending-undelivered' };
+
+  // Observe deliveries first: the commit advances the baseline BEFORE any
+  // render below, so revalidation of post-delivery drift diffs against the
+  // state the agent was actually told about.
+  if (existing && existing.deliveredVia.length > 0) {
+    await commitDeliveredBatch(hash, state, existing);
   }
 
   if (!shouldInjectAtUserPrompt(state.queue.isEmpty())) {
     return { wrote: false, reason: 'queue-empty' };
   }
 
+  // An undelivered batch blocks rendering only while it is still CURRENT —
+  // newer queue drift (lastPushAt past the batch's stamp) re-renders it in
+  // place, merging everything since the last delivered baseline into one
+  // fresh batch (§4.4; smoke test 2026-09-02).
+  if (existing && existing.deliveredVia.length === 0) {
+    if (state.queue.lastPushAt <= (existing.queueStamp ?? 0)) {
+      return { wrote: false, reason: 'pending-current' };
+    }
+  }
+
+  // Captured BEFORE the async probe/diff work: a watcher batch landing
+  // mid-render bumps lastPushAt past this stamp, forcing the next render
+  // pass (every batch ends with renderSession) to redo this one.
+  const queueStamp = state.queue.lastPushAt;
   const peeked = state.queue.peek() as AttributedDrift[];
 
   // E19 revalidation against live disk (phantom creates, net-zero edits).
@@ -94,13 +193,24 @@ export async function maybeRenderPending(
       hashOnly: diffBlacklisted(p),
     });
   const { keep: records, dropped } = await revalidateRecords(peeked, probe, state.akb);
+  // Phantom/net-zero records retire immediately — they carry no fact worth
+  // delivering, and retiring them needs no AKB commit. dropped[] wraps the
+  // ORIGINAL peeked objects, so identity retirement works here.
+  state.queue.commitRendered(dropped.map((d) => d.record));
   if (records.length === 0) {
-    state.queue.commitRendered(peeked); // phantom/net-zero — retire silently
+    // Every staged fact went stale before delivery (e.g. a created file was
+    // renamed away): retract the undelivered batch instead of letting the
+    // hook inject facts that no longer match the disk (report §2.3).
+    if (existing && existing.deliveredVia.length === 0) {
+      await fs.rm(file, { force: true }).catch(() => {});
+      state.lastRendered = undefined;
+      await log(`retracted ${state.sessionId} batch=${existing.batchId} (all facts stale)`);
+    }
     return { wrote: false, reason: 'phantom' };
   }
 
   const entries: RenderEntry[] = [];
-  const freshContent = new Map<string, Buffer>();
+  const contentRefs = new Map<string, string>();
   for (const record of records) {
     let diff: RenderEntry['diff'] = null;
     let attribution: RenderEntry['attribution'] = record.attribution;
@@ -127,7 +237,15 @@ export async function maybeRenderPending(
             maxLines: config.budget.maxDiffLinesPerFile,
           });
         }
-        freshContent.set(record.path, current.content);
+        if (record.contentHash) {
+          // Persist by content hash NOW (idempotent, orphan-safe); the AKB
+          // entry references it only when the batch commits at delivery.
+          state.memoryCache.set(record.contentHash, current.content);
+          if (config.baseline.persistContent) {
+            await state.contentStore.put(record.contentHash, current.content);
+          }
+          contentRefs.set(record.path, record.contentHash);
+        }
       }
     }
     entries.push({ record, attribution, diff });
@@ -163,66 +281,12 @@ export async function maybeRenderPending(
     priority,
     text,
     deliveredVia: [],
+    queueStamp,
   };
   await atomicWriteFile(file, JSON.stringify(pending));
-
-  // ---- Sync Point: pending persisted → commit baseline + retire queue ----
-  const now = Date.now();
-  for (const record of records) {
-    try {
-      switch (record.kind) {
-        case 'deleted':
-          state.akb.markKnownDeleted(record.path, now);
-          break;
-        case 'renamed': {
-          const from = record.fromPath;
-          const old = from ? state.akb.get(from) : undefined;
-          if (from) state.akb.delete(from);
-          if (old || record.contentHash) {
-            state.akb.set(record.path, {
-              contentHash: record.contentHash ?? old!.contentHash,
-              ...(old?.contentRef !== undefined ? { contentRef: old.contentRef } : {}),
-              mtimeMs: record.mtimeMs ?? now,
-              size: record.size ?? 0,
-              source: 'read',
-              updatedAt: now,
-            });
-          }
-          break;
-        }
-        case 'created':
-        case 'modified': {
-          const content = freshContent.get(record.path);
-          let contentRef: string | undefined;
-          if (content && record.contentHash) {
-            state.memoryCache.set(record.contentHash, content);
-            if (config.baseline.persistContent) {
-              await state.contentStore.put(record.contentHash, content);
-            }
-            contentRef = record.contentHash;
-          }
-          if (record.contentHash) {
-            state.akb.set(record.path, {
-              contentHash: record.contentHash,
-              ...(contentRef !== undefined ? { contentRef } : {}),
-              mtimeMs: record.mtimeMs ?? now,
-              size: record.size ?? 0,
-              source: 'read',
-              ...(content === undefined ? { partial: true } : {}),
-              updatedAt: now,
-            });
-          }
-          break;
-        }
-      }
-    } catch (err) {
-      await log(`sync-point ${state.sessionId} ${record.path}: ${(err as Error).message}`);
-    }
-  }
-  state.queue.commitRendered(peeked); // rendered + dropped retire together (E19)
-  // Awaited (not fire-and-forget) so shutdown/test cleanup never races the
-  // snapshot write (CI hit ENOTEMPTY on Linux otherwise).
-  await saveSessionState(hash, state);
+  // Held for commitDeliveredBatch; the records stay in the queue until the
+  // hook confirms delivery of exactly this batchId.
+  state.lastRendered = { batchId: pending.batchId, records, contentRefs };
 
   await log(
     `rendered ${state.sessionId} batch=${pending.batchId} files=${records.length} ` +

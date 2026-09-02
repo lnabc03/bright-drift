@@ -32,7 +32,10 @@ export async function resolveGitTracked(
     execFile(
       'git',
       ['-C', root, 'ls-files', '-z', '--', ...paths],
-      { maxBuffer: 16 * 1024 * 1024 },
+      // windowsHide: the phase-2 daemon is a detached console-less process;
+      // without this every spawned git allocates a fresh console and the
+      // user sees a window flash per watcher batch (smoke test 2026-09-02).
+      { maxBuffer: 16 * 1024 * 1024, windowsHide: true },
       (error, stdout) => {
         if (error) {
           resolve(null); // not a repo / no git binary / any failure → unknown

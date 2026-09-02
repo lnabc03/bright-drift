@@ -31,6 +31,22 @@ export interface SessionState {
   memoryCache: MemoryContentCache;
   contentStore: ContentStore;
   registeredAt: number;
+  /**
+   * The batch most recently rendered into pending/<sid>.json, held until the
+   * daemon observes its delivery (deliveredVia non-empty) and commits it —
+   * the Sync Point moved from render time to delivery time so an undelivered
+   * batch stays re-renderable against a stable baseline (smoke test
+   * 2026-09-02). Transient: intentionally NOT persisted; a restarted daemon
+   * re-detects uncommitted drift via cold-start reconcile and re-renders.
+   */
+  lastRendered?:
+    | {
+        batchId: string;
+        records: AttributedDrift[];
+        /** path → contentRef for records whose content was persisted at render. */
+        contentRefs: Map<string, string>;
+      }
+    | undefined;
 }
 
 export function createSessionState(

@@ -164,12 +164,13 @@ export class WorkspaceEngine {
       await saveSessionState(this.hash, state);
       this.sessions.delete(sessionId);
     }
-    // NOTE: an undelivered pending batch is deliberately KEPT. The Sync Point
-    // committed the AKB at render time, so a later cold-start reconcile sees
-    // no drift — deleting the pending file would lose the notice entirely
-    // (e2e P2-T3 2026-09-02: drift rendered mid-turn, SessionEnd deleted it,
-    // next turn reported nothing). The text is timestamp-free fact wording,
-    // so late delivery on resume is accurate and harmless.
+    // NOTE: an undelivered pending batch is deliberately KEPT. Since the
+    // Sync Point commits the AKB only when delivery is observed, a cold-start
+    // reconcile on resume re-detects the drift and re-renders a FRESH batch
+    // over the kept file (queueStamp guard) — deleting the pending file would
+    // still lose nothing, but keeping it means even a session that never
+    // re-registers can pick its drift up (e2e P2-T3 2026-09-02: SessionEnd
+    // once deleted a mid-turn rendered batch and the notice vanished).
   }
 
   /** Session declared dead by the sweep: same as deregister. */
@@ -210,6 +211,10 @@ export class WorkspaceEngine {
     if (!state) return;
     const rel = toRelativeKey(this.workspaceRoot, msg.filePath);
     if (rel === null) return;
+    // An observe can invalidate a QUEUED record (echo race: the watcher saw
+    // the agent's own write before this mailbox message arrived) — nudge the
+    // stamp so this tick's renderAll revalidates and retracts it.
+    if (state.queue.has(rel)) state.queue.touch();
     const config = this.config;
     const hashOnly = createPatternMatcher(config.diff.blacklist)(rel); // D9
     const obs = await probeFile(this.workspaceRoot, rel, {
@@ -345,6 +350,10 @@ export class WorkspaceEngine {
           };
           state.queue.push(attributed);
         }
+        // Events that produced no record can still invalidate a QUEUED fact
+        // (a staged create whose file was just deleted): nudge the stamp so
+        // the render pass revalidates and retracts the stale batch.
+        if (events.some((e) => state.queue.has(e.path))) state.queue.touch();
         if (records.length > 0) {
           await log(
             `drift ${state.sessionId}: ${records.map((r) => `${r.kind}:${r.path}`).join(',')}`,
