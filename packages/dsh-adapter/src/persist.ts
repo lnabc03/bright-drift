@@ -73,11 +73,13 @@ export async function reconcileOnStart(
       paths.map((p) => probeFile(state.workspaceRoot, p, { maxFileSizeKB: config.diff.maxFileSizeKB })),
     );
     const now = Date.now();
+    // Only AKB-tracked paths are probed here, so `created` records cannot
+    // arise (unknown paths are never observed) and the D7 gate is a no-op.
     const records = reconcile(state.akb, observations, now);
     for (const record of records) {
       const attributed: AttributedDrift = {
         ...record,
-        attribution: state.attributor.classify(record.at),
+        attribution: state.attributor.classify(record.at, record.path),
       };
       state.queue.push(attributed);
     }
