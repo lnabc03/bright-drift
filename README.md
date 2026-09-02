@@ -104,18 +104,19 @@ bright-drift:
     maxInjectTokens: 2000      # 单次注入令牌上限
     maxTotalDiffLines: 1000
     maxDiffLinesPerFile: 200
-    maxFilesPerInjection: 50
+    maxDriftFilesForDiff: 50
   diff:
     contextLines: 3
     maxFileSizeKB: 512
   attribution:
-    commandGraceMs: 1500       # 命令结束后的宽限期内写入 = 其副作用
+    bashWindowGraceMs: 1500    # 命令结束后的宽限期内写入 = 其副作用
     longCommandMs: 10000       # 更长的命令 → ambiguous-external 措辞
     formatterWindowMs: 1000    # agent 写入后紧随的格式化 diff = 格式化器改动
-    formatterSilent: true
+    formatterSilent: false
   inject:
     onPreStep: true
     onSessionStart: true
+    promptSection: true        # 系统提示词段落，解释漂移通知语义（§5.5.6）
   baseline:
     persist: true
     persistContent: true       # 内容寻址副本，使重启后仍能做真实 diff

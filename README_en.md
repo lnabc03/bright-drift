@@ -105,18 +105,19 @@ bright-drift:
     maxInjectTokens: 2000      # per-injection token ceiling
     maxTotalDiffLines: 1000
     maxDiffLinesPerFile: 200
-    maxFilesPerInjection: 50
+    maxDriftFilesForDiff: 50
   diff:
     contextLines: 3
     maxFileSizeKB: 512
   attribution:
-    commandGraceMs: 1500       # writes within grace after a command end = its side-effect
+    bashWindowGraceMs: 1500    # writes within grace after a command end = its side-effect
     longCommandMs: 10000       # longer commands → ambiguous-external wording
     formatterWindowMs: 1000    # cosmetic diff right after an agent write = formatter pass
-    formatterSilent: true
+    formatterSilent: false
   inject:
     onPreStep: true
     onSessionStart: true
+    promptSection: true        # system-prompt section explaining drift-notice semantics (§5.5.6)
   baseline:
     persist: true
     persistContent: true       # content-addressed copies enable real diffs after restart
