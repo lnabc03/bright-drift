@@ -21,7 +21,6 @@ packages/
 bright-drift-PRD.md               # 产品定义（中文）
 bright-drift-design-phase1.md     # 一期技术设计（中文，单一事实源）
 bright-drift-design-phase2.md     # 二期技术设计（中文）
-bright-drift-phase2-research.md   # 二期预研报告（spike 实测数据）
 ```
 
 **架构红线（不可违反，违者返工）：**

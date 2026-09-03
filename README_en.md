@@ -182,7 +182,6 @@ packages/
 bright-drift-PRD.md               # product definition (Chinese)
 bright-drift-design-phase1.md     # phase-1 technical design (Chinese, source of truth)
 bright-drift-design-phase2.md     # phase-2 technical design (Chinese)
-bright-drift-phase2-research.md   # phase-2 research report (spike measurements)
 AGENTS.md                         # contributor/agent conventions
 ```
 
