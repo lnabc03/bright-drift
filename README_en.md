@@ -6,7 +6,7 @@ bright-drift is an agent plugin that continuously watches the workspace, identif
 
 | Platform                  | npm package                 | Install                                    |
 | ------------------------- | --------------------------- | ------------------------------------------ |
-| DeepSeek Harness (dsh)    | `bright-drift`              | `dsh plugin add bright-drift`              |
+| DeepSeek Harness (dsh)    | `bright-drift`              | `dsh plugin --profile web add bright-drift` |
 | Claude Code (CLI)         | `bright-drift-claude-code`  | `npx bright-drift-claude-code install`     |
 
 ## The problem

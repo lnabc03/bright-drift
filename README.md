@@ -6,7 +6,7 @@ bright-drift 是一个 agent 插件：持续监控工作区，识别用户/外�
 
 | 平台                    | npm 包                      | 安装命令                                   |
 | --------------------- | -------------------------- | -------------------------------------- |
-| DeepSeek Harness（dsh） | `bright-drift`             | `dsh plugin add bright-drift`          |
+| DeepSeek Harness（dsh） | `bright-drift`             | `dsh plugin --profile web add bright-drift` |
 | Claude Code（CLI）      | `bright-drift-claude-code` | `npx bright-drift-claude-code install` |
 
 ## 要解决的问题
