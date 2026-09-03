@@ -36,7 +36,7 @@ docs/              # PRD、设计文档（当前在仓库根，M1 时迁入）
 
 ### 3.2 分支与提交
 
-- 主分支 `main`，功能分支 `feat/<topic>`、修复 `fix/<topic>`；PR 合入，不直接推 main。
+- 主分支 `main`：简单改动（文档、注释、错字等）直接提交推 main。功能分支 `feat/<topic>`、修复 `fix/<topic>` 仅在较大改动（新功能、行为变更、core 公共 API 变更）或开发者明确要求时使用，走 PR 合入。
 - 提交信息用 Conventional Commits：`feat(core): …`、`fix(adapter): …`、`docs: …`、`test: …`、`chore: …`。scope 只用包名（`core`/`dsh-adapter`）或 `repo`。
 - 一个 PR 只做一件事；改动 core 公共 API 的 PR 必须在描述里写明对二期 adapter 的影响（core API 在 v1.0 前标记 experimental，见 PRD §9.3）。
 - 语义化版本；core 与 adapter 同仓库但独立发版（`bright-drift-core` / `bright-drift`）。
