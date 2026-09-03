@@ -5,6 +5,7 @@ import { libDir, mkTmp, runHookFile } from '../testkit.js';
 import { atomicWriteFile } from '../shared/atomic.js';
 import { pendingFile, sessionFile, wsHash } from '../shared/paths.js';
 import { SCHEMA_VERSION, type PendingInjection, type SessionEntry } from '../shared/schema.js';
+import { STATIC_OVERVIEW, shouldInjectOverview } from './static-overview.js';
 
 let stateHome: string;
 let cwd: string;
@@ -146,5 +147,28 @@ describe('session-start hook selftest (installer dry-run, §5.9-3)', () => {
     expect(JSON.parse(res.stdout)).toMatchObject({ ok: true });
     // No workspace dirs created in selftest mode.
     expect(await fs.readdir(stateHome)).not.toContain('workspaces');
+  });
+});
+
+describe('static overview (§5.6.5)', () => {
+  it('labels match the phase-1 legend (EXTERNAL·* / COMMAND-SIDE-EFFECT / FORMATTED)', () => {
+    expect(STATIC_OVERVIEW).toContain('EXTERNAL·*');
+    expect(STATIC_OVERVIEW).toContain('COMMAND-SIDE-EFFECT');
+    expect(STATIC_OVERVIEW).toContain('FORMATTED');
+    expect(STATIC_OVERVIEW).not.toContain('external-change / command-side-effect / ambiguous');
+  });
+
+  it('shouldInjectOverview defaults true with no config (fail-open)', async () => {
+    expect(await shouldInjectOverview(cwd)).toBe(true);
+  });
+
+  it('shouldInjectOverview honors inject.staticOverview: false', async () => {
+    await fs.writeFile(path.join(stateHome, 'config.yml'), 'inject:\n  staticOverview: false\n');
+    expect(await shouldInjectOverview(cwd)).toBe(false);
+  });
+
+  it('shouldInjectOverview fails open on a corrupt config', async () => {
+    await fs.writeFile(path.join(stateHome, 'config.yml'), 'inject: [unclosed');
+    expect(await shouldInjectOverview(cwd)).toBe(true);
   });
 });
