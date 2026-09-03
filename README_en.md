@@ -1,33 +1,33 @@
 # bright-drift
 
-> Workspace drift awareness for AI coding agents — your agent always knows what changed while it was thinking.
+> Workspace drift awareness for agents — so the agent immediately knows what external changes happened in its workspace.
 
-bright-drift is an agent plugin: it continuously watches the workspace, identifies file additions/modifications/deletions made by the user or external processes, and injects a "file-level change list + budgeted line-level diff" into the agent's context before the next model request.
+bright-drift is an agent plugin that continuously watches the workspace, identifies file additions/modifications/deletions made by the user or external processes, and injects a file-level change list plus a budgeted line-level diff into the agent's context before the next model request. The core engine (`bright-drift-core`) is platform-independent; two adapters wire it into two host platforms:
+
+| Platform                  | npm package                 | Install                                    |
+| ------------------------- | --------------------------- | ------------------------------------------ |
+| DeepSeek Harness (dsh)    | `bright-drift`              | `dsh plugin add bright-drift`              |
+| Claude Code (CLI)         | `bright-drift-claude-code`  | `npx bright-drift-claude-code install`     |
 
 ## The problem
 
-Co-editing the workspace with an agent is a common scenario: while the agent reasons, edits files, and runs commands, you're touching the same files too — deleting or renaming a file, changing a function name in a debug script, fixing a typo by hand (not to mention formatter passes, build outputs, and branch switches). But the agent is largely blind to these external moves.
+When a human and an agent edit the same workspace in parallel — the most common form of collaboration — the agent's view of a file goes stale the moment that file changes out from under it. Deletions, renames, function edits, formatter passes, build artifacts, branch switches: none of these user- or process-driven changes enter the agent's context.
 
-So when it finally bumps into a change that never made it into its context, it's caught off guard: it may revert a commit just to "restore" the file you deleted on purpose, or keep marching down the now-stale context until it's hard-blocked by that function you renamed. Avoiding these traps would mean telling it everything, step by step — which is exactly the burden on the user.
+This "workspace drift" carries real cost: the agent may revert a commit just to "restore" a file you deliberately deleted, or keep reasoning against an outdated view until it hard-blocks on a renamed symbol. Avoiding that has meant spelling out every change by hand — the exact burden bright-drift removes.
 
-bright-drift removes that friction from human-agent co-editing. It watches the workspace, keeps a per-session baseline of what the agent has seen (the *Agent Knowledge Base*), and injects a compact, budgeted drift notice right before the next model request — letting the plugin report what happened instead of you having to spell it out:
+bright-drift watches the workspace, keeps a per-session baseline of what the agent has seen (the *Agent Knowledge Base*), and injects a compact, budgeted drift notice before the next model request — stating what happened on your behalf:
 
 ```
-COMMAND-SIDE-EFFECT  你的命令 `npm run codegen` 改动了 1 个文件：
-  modified  src/api/client.gen.ts  (+12 -3)
-  ── src/api/client.gen.ts
-  @@ -40,7 +40,7 @@
-  -  baseURL: 'http://localhost:3000',
-  +  baseURL: 'https://api.example.com',
+EXTERNAL·RENAMED  工作区中 1 个文件被重命名（非你操作）：
+  renamed  src/lib/parser.ts → src/lib/parser-v2.ts
 ```
 
 ## Design principles
 
-- **Single injection point.** One channel — the pre-step boundary — no mid-step interruptions, no duplicate messages.
-- **Honest attribution.** Every change is classified: agent write (echo, suppressed), command side-effect, formatter pass, external edit. Ambiguity always biases toward "external" and says so — an agent that trusts a wrong "I did this" is worse than one that double-checks.
+- **Honest attribution.** Every change is classified: agent write (echo, suppressed), command side-effect, formatter pass, external edit. Ambiguity always biases toward "external" and says so — an agent that wrongly believes a change is its own doing is worse than one that double-checks.
 - **Budgeted.** Token-ladder budget (default ≤2000 tokens/injection); diffs degrade gracefully to one-line change summaries when over budget.
 - **Fail-open.** Any internal error degrades to "no injection" and a log line — never a broken agent session.
-- **Private by construction.** Logs record hashes, paths, and counts — never file contents. Content copies stay on your machine under `~/.dsh/state/bright-drift/`.
+- **Private by construction.** Logs record hashes, paths, and counts — never file contents. Content copies stay on your machine in the local state directory.
 
 ## Install (DeepSeek Harness)
 
@@ -37,11 +37,11 @@ dsh plugin --profile web add bright-drift
 dsh plugin --profile headless add bright-drift
 ```
 
-Requires dsh ≥ 0.1.1-rc.2. The plugin mounts as a host-plane bundle; restart the profile (or let the patch watcher remount) and it's live.
+Requires dsh ≥ 0.1.1-rc.2. The plugin mounts as a host-plane bundle; restart dsh and it's live.
 
 ### Development install
 
-To install from a source checkout:
+To install from source:
 
 ```bash
 # 1. Clone and build — both lib/ outputs and the repo's own node_modules
@@ -83,7 +83,7 @@ Notes / troubleshooting:
 - Uninstall: `dsh plugin --profile web remove bright-drift` (the bundles entry is removed automatically).
 - If pnpm still errors on `workspace:*`, the override in step 2 is missing, misplaced (it goes in the **profile's** `pnpm-workspace.yaml`, not the repo's), or not an absolute path.
 
-## Usage
+## Usage (DeepSeek Harness)
 
 Nothing to configure by default. Once installed:
 
@@ -95,48 +95,7 @@ Nothing to configure by default. Once installed:
   - `/bright-drift nodiff add|remove|list [pattern]` — manage the diff blacklist (writes the project-level `.dsh/bright-drift.yml`, applies immediately)
   - `/bright-drift pause` / `resume` — pause injections (monitoring continues); accumulated drift is delivered in one batch on resume
 
-## Configuration
-
-Global, in `~/.dsh/settings.yaml` (hot-reloads in ~100ms):
-
-```yaml
-bright-drift:
-  enabled: true
-  budget:
-    maxInjectTokens: 2000      # per-injection token ceiling
-    maxTotalDiffLines: 1000
-    maxDiffLinesPerFile: 200
-    maxDriftFilesForDiff: 50
-  diff:
-    contextLines: 3
-    maxFileSizeKB: 512
-    blacklist: []              # diff blacklist (gitignore-style globs): matched files
-                               # keep file-level notices only — no diff, no content copies;
-                               # manageable via /bright-drift nodiff add|remove|list
-  attribution:
-    bashWindowGraceMs: 1500    # writes within grace after a command end = its side-effect
-    longCommandMs: 10000       # longer commands → ambiguous-external wording
-    formatterWindowMs: 1000    # cosmetic diff right after an agent write = formatter pass
-    formatterSilent: false
-  inject:
-    onPreStep: true
-    onSessionStart: true
-    promptSection: true        # system-prompt section explaining drift-notice semantics (§5.5.6)
-  baseline:
-    persist: true
-    persistContent: true       # content-addressed copies enable real diffs after restart
-    contentStoreMaxMB: 256
-  watch:
-    respectGitignore: true
-    extraIgnore: []
-    includeUntracked: false    # report created drift for git-untracked files;
-                               # non-git workspaces report all; window-predicted
-                               # command outputs are always reported
-```
-
-Per-project override: `<workspace>/.dsh/bright-drift.yml` (same shape, project wins).
-
-## Install (Claude Code, phase 2)
+## Install (Claude Code CLI)
 
 ```bash
 npx bright-drift-claude-code install            # user-level ~/.claude/settings.json
@@ -144,14 +103,57 @@ npx bright-drift-claude-code install --project  # this repo's .claude/settings.j
 npx bright-drift-claude-code uninstall          # remove (state kept; --purge deletes)
 ```
 
-The installer **merges** hooks into settings.json (never overwrites existing entries) and installs the `/bright-drift:status|pause|resume|nodiff` slash commands. **CLI only** — Claude Code Desktop / Agent SDK / VS Code do not load hooks ([#87657](https://github.com/anthropics/claude-code/issues/87657), unfixed).
+The installer **merges** hooks into settings.json (never overwrites existing entries) and installs five slash commands: `/bright-drift:status|diff|pause|resume|nodiff`. **CLI only** — Claude Code Desktop / Agent SDK / VS Code do not load hooks ([#87657](https://github.com/anthropics/claude-code/issues/87657)), and plugin hook discovery via `hooks.json` is broken ([#16288](https://github.com/anthropics/claude-code/issues/16288)).
 
-Complementary to built-in CC defenses, not a duplicate:
+Complementary to built-in CC defenses:
 
 - **FileStateCache** is a write-time optimistic lock (`File has been modified since read`) — it stops the agent from clobbering your edits, but the agent never learns *that* the file changed or disappeared.
 - **bright-drift** fills the awareness gap: deletion/rename detection, drift on files the agent only read, line-level diffs, proactive turn-boundary notices with attribution.
 
-The architecture differs from phase 1: hooks are short-lived processes; watching is done by one detached daemon per workspace (idles out after 30 min), with all state as plain JSON under `~/.claude/state/bright-drift/`. Injection goes via UserPromptSubmit (main channel) plus Stop (high-priority batches only, at most once per batch).
+## Configuration
+
+Except for the `inject` section and config-file locations, the two platforms share one config schema (the `watch`/`budget`/`diff`/`baseline`/`attribution` sections are identical):
+
+```yaml
+enabled: true
+budget:
+  maxInjectTokens: 2000      # per-injection token ceiling
+  maxTotalDiffLines: 1000
+  maxDiffLinesPerFile: 200
+  maxDriftFilesForDiff: 50
+diff:
+  contextLines: 3
+  maxFileSizeKB: 512
+  blacklist: []              # diff blacklist (gitignore-style globs): matched files
+                             # keep file-level notices only — no diff, no content copies
+attribution:
+  bashWindowGraceMs: 1500    # writes within grace after a command end = its side-effect
+  longCommandMs: 10000       # longer commands → ambiguous-external wording
+  formatterWindowMs: 1000    # cosmetic diff right after an agent write = formatter pass
+  formatterSilent: false
+baseline:
+  persist: true
+  persistContent: true       # content-addressed copies enable real diffs after restart
+  contentStoreMaxMB: 256
+watch:
+  respectGitignore: true
+  extraIgnore: []
+  includeUntracked: false    # report created drift for git-untracked files;
+                             # non-git workspaces report all; window-predicted
+                             # command outputs are always reported
+```
+
+The `inject` section varies with each platform's injection channels:
+
+- **dsh**: `onPreStep` (inject at the pre-step boundary), `onSessionStart` (inject on session start), `promptSection` (system-prompt section explaining notice semantics)
+- **Claude Code**: `onUserPrompt` (UserPromptSubmit main channel), `onStop` (Stop top-up, high-priority only), `staticOverview` (SessionStart static overview)
+
+Config-file locations (both hot-reload in ~100 ms):
+
+| Platform     | Global                                        | Per-project override                       |
+| ------------ | --------------------------------------------- | ------------------------------------------ |
+| dsh          | `~/.dsh/settings.yaml`, under the `bright-drift:` key | `<workspace>/.dsh/bright-drift.yml`  |
+| Claude Code  | `~/.claude/state/bright-drift/config.yml`     | `<repo>/.claude/bright-drift.yml`          |
 
 ## How it works
 
@@ -161,21 +163,22 @@ tool results ─▶ baseline update (read/write/edit re-read the file themselves
 shell calls ───▶ FR-7 attribution windows (bash/pwsh, foreground & background)
                      │
                      ▼
-              per-session drift queue ──▶ pre-step waterfall ──▶ budgeted render ──▶ Sync Point
-                                       (single channel,      (diff within token   (baseline rebased
-                                        suppressed at turn    budget, attribution  exactly when the
-                                        close)                labels attached)     message persists)
+              per-session drift queue ──▶ injection channel ──▶ budgeted render ──▶ Sync Point
+                                       (dsh: pre-step      (diff within token   (baseline rebased
+                                        boundary; CC:       budget, attribution  exactly when the
+                                        UserPromptSubmit    labels attached)     message persists)
+                                        + Stop top-up)
 ```
 
-The engine (`bright-drift-core`) is platform-independent: no dsh imports, fully unit-tested off-harness (130 tests). The dsh adapter (`bright-drift`) is a thin host-plane bundle wiring core into dsh events.
+The engine (`bright-drift-core`) is platform-independent: no host imports, fully unit-tested off-harness (154 tests). Both adapters are thin shells: `bright-drift` (dsh) wires core into dsh events, `bright-drift-claude-code` (CC) wires core into CC sessions via short-lived hooks + a detached daemon.
 
 ## Repository layout
 
 ```
 packages/
   core/            # bright-drift-core — platform-independent engine
-  dsh-adapter/     # bright-drift — the dsh plugin (phase 1)
-  claude-code/     # bright-drift-claude-code — Claude Code hooks + daemon (phase 2)
+  dsh-adapter/     # bright-drift — the dsh plugin
+  claude-code/     # bright-drift-claude-code — Claude Code hooks + daemon
 bright-drift-PRD.md               # product definition (Chinese)
 bright-drift-design-phase1.md     # phase-1 technical design (Chinese, source of truth)
 bright-drift-design-phase2.md     # phase-2 technical design (Chinese)
@@ -185,11 +188,9 @@ AGENTS.md                         # contributor/agent conventions
 
 ## Status & roadmap
 
-- **Phase 1**: dsh adapter — M0 runtime verification ✅, M1 core engine ✅, M2 dsh integration ✅ (E2E-verified on a headless profile), M3 polish.
-- **Phase 2 (this repo, current)**: Claude Code adapter — M4 skeleton ✅, M5 feature parity ✅ (P2-T1/T2/T3/T7 e2e-verified), M6 polish & release.
-- **Phase 3**: Codex / opencode, as demand warrants.
-
-Core APIs are experimental until v1.0.
+- **✅️ Phase 1 (dsh)**: M0 runtime verification → M1 core engine → M2 dsh integration → M3 polish, all released.
+- **✅️ Phase 2 (Claude Code)**: M4 skeleton → M5 feature parity → M6 polish, all released.
+- **⭕️ Phase 3**: Codex / opencode / …, as demand warrants.
 
 ## License
 
