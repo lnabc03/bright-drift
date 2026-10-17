@@ -4,12 +4,12 @@ import {
   DriftQueue,
   MemoryContentCache,
 } from 'bright-drift-core';
-import type { AgentLike } from './types.js';
+import type { Agent } from '@deepseek-ai/dsh-agent';
 import type { BrightDriftConfig } from './config.js';
 
 /** Everything the plugin knows about one agent (D1: keyed by Agent object). */
 export interface AgentState {
-  readonly agent: AgentLike;
+  readonly agent: Agent;
   readonly sessionId: string;
   /** Workspace root (agent.session.header.cwd, sandbox fallback applied by caller). */
   workspaceRoot: string;
@@ -29,7 +29,7 @@ export interface AgentState {
   };
 }
 
-export function createAgentState(agent: AgentLike, workspaceRoot: string, config: BrightDriftConfig): AgentState {
+export function createAgentState(agent: Agent, workspaceRoot: string, config: BrightDriftConfig): AgentState {
   return {
     agent,
     sessionId: agent.session.id,
@@ -63,14 +63,14 @@ export function reconfigureState(state: AgentState, config: BrightDriftConfig): 
 
 /** Process-wide registry (single host plugin instance, D1). */
 export class StateRegistry {
-  private byAgent = new WeakMap<AgentLike, AgentState>();
+  private byAgent = new WeakMap<Agent, AgentState>();
   private bySessionId = new Map<string, AgentState>();
 
-  get(agent: AgentLike): AgentState | undefined {
+  get(agent: Agent): AgentState | undefined {
     return this.byAgent.get(agent);
   }
 
-  getOrCreate(agent: AgentLike, workspaceRoot: string, config: BrightDriftConfig): AgentState {
+  getOrCreate(agent: Agent, workspaceRoot: string, config: BrightDriftConfig): AgentState {
     let state = this.byAgent.get(agent);
     if (!state) {
       state = createAgentState(agent, workspaceRoot, config);

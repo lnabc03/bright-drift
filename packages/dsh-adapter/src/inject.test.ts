@@ -8,7 +8,8 @@ import { handleWatchBatch } from './pipeline.js';
 import { StateRegistry, type AgentState } from './state.js';
 import { ConfigResolver, DEFAULT_CONFIG } from './config.js';
 import { Logger } from './log.js';
-import type { AgentLike } from './types.js';
+import { fakeAgent } from './testkit.js';
+import { CONTEXT_SUMMARY_MAX_CHARS } from '@deepseek-ai/dsh-llm';
 
 let ws: string;
 let storeDir: string;
@@ -25,7 +26,7 @@ beforeEach(async () => {
   registry = new StateRegistry();
   resolver = new ConfigResolver();
   contentStore = new ContentStore(storeDir, { maxBytes: 1024 * 1024 });
-  const agent: AgentLike = { session: { id: 'sess-1', header: { cwd: ws } } };
+  const agent = fakeAgent('sess-1', ws);
   state = registry.getOrCreate(agent, ws, DEFAULT_CONFIG);
 });
 
@@ -65,8 +66,11 @@ describe('buildInjection end-to-end (FR-2/FR-3/FR-4 core loop)', () => {
 
     const message = await buildInjection(state, DEFAULT_CONFIG, deps());
     expect(message).not.toBeNull();
-    expect(message!.source).toMatchObject({ kind: 'plugin', plugin: 'bright-drift', form: 'notice' });
-    expect(message!.source.summary.length).toBeLessThanOrEqual(120);
+    // T12 (0.4.0): producer-declared source kind, notice form, bounded summary.
+    expect(message!.source).toMatchObject({ kind: 'bright-drift', form: 'notice' });
+    expect(message!.id).toBeTruthy();
+    const summary = (message!.source as { summary: string }).summary;
+    expect(summary.length).toBeLessThanOrEqual(CONTEXT_SUMMARY_MAX_CHARS);
     const text = message!.content[0]!.text;
     expect(text).toContain('EXTERNAL·MODIFIED (high confidence)  a.ts');
     expect(text).toContain('-const TTL = 3600;');

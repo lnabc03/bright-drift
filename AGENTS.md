@@ -62,9 +62,9 @@ bright-drift-design-phase2.md     # 二期技术设计（中文）
 1. **不要凭记忆写 dsh API**。dsh 迭代快，写代码前先查本机安装的源码与 `.d.ts`：设计文档附录「关键源码坐标」是入口。运行时能力用 Cordis Inspect Provider 核实。
 2. 插件是 **Host 平面 bundle**（决策 D1）：root ctx 监听、按 `Agent` 对象 WeakMap 分键。不要注册成 preset 行；不要往 preset 里发布服务（isolate realm 规则见 dsh 的 editing-cordis-compositions skill）。
 3. **永不修改 dsh 随附安装**（`config/agent-presets/` 下的 shipped preset、host composition）。需要改动 preset 行为时拷贝后改副本。
-4. 事件契约要点：pre-step 先 `next()` 后追加；空批次 + 无工具执行 = 疑似 turn 关闭检查，**不注入**（§5.5.3）；`fs/observed` 监听器必须同步、不得 throw。
+4. 事件契约要点：会话初始化挂 `agent/created`（0.2.0 起；serial 事件，listener 必须同步、不抛、显式 `return undefined`，重活 fire-and-forget）；清理挂 `agent/disposed` + `session/disposed`（payload 是 `Session` 对象，两者幂等）；pre-step 先 `next()` 后追加；空批次 + 无工具执行 = 疑似 turn 关闭检查，**不注入**（§5.5.3）；`fs/observed` 监听器必须同步、不得 throw。配置热更新走 `loader/volatile-update`；Config 的 volatile 标在 section/叶子，**禁止标根对象**（会使默认值不填充）。
 5. 工具名集合：读 `read`/`read_image`，写 `write`/`edit`，shell 是 `bash`（POSIX）或 `pwsh`（Windows）——归因逻辑必须按平台取正确的 shell 工具名。
-6. 注入消息 source 固定为 `{kind:'plugin', plugin:'bright-drift', form:'notice', summary}`，summary ≤120 字符。
+6. 注入消息用 `createUserMessage()` 构造，source 固定为 `{kind:'bright-drift', form:'notice', summary}`（0.2.0 起 `MessageSourceMap` 模块增强自声明生产者 kind，无共享 `plugin` 兜底），summary 经 `boundContextSummary()` 截至 ≤120 字符。
 7. 依赖版本与 dsh 依赖树对齐：chokidar ^4.0.3、diff ^9.0.0（以安装树实际版本为准，升级前先核对）。
 
 ## 5. Claude Code 平台注意事项（二期 adapter）
@@ -89,7 +89,7 @@ bright-drift-design-phase2.md     # 二期技术设计（中文）
 
 | 内容 | dsh（一期） | Claude Code（二期） |
 |---|---|---|
-| 全局配置 | `~/.dsh/settings.yaml` 的 `bright-drift:` 节 | `~/.claude/state/bright-drift/config.yml` |
+| 全局配置 | `$DSH_HOME/profiles/<name>/cordis.patch.yml` 的 `- id: bright-drift` 行 `config:`（跨 profile 写 `$DSH_HOME/cordis.patch.yml`；0.2.0 起，旧 `settings.yaml` 已废弃、启动时按 entry id 一次性导入） | `~/.claude/state/bright-drift/config.yml` |
 | 项目级覆盖 | `<workspace>/.dsh/bright-drift.yml` | `<repo>/.claude/bright-drift.yml` |
 | 状态根 | `~/.dsh/state/bright-drift/` | `~/.claude/state/bright-drift/`（可用 `BRIGHT_DRIFT_STATE_HOME` 重定向） |
 | AKB / 会话状态 | `~/.dsh/state/bright-drift/akb/<sessionId>.json` | `~/.claude/state/bright-drift/workspaces/<ws-hash>/akb/<sessionId>/` |

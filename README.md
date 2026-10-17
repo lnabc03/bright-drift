@@ -37,7 +37,7 @@ dsh plugin --profile web add bright-drift
 dsh plugin --profile headless add bright-drift
 ```
 
-需要 dsh ≥ 0.1.1-rc.2。插件以 host-plane bundle 形态挂载；重启dsh后即生效。
+需要 dsh ≥ 0.2.0（0.4.0 起；0.1.x 请使用 bright-drift 0.3.x）。插件以 host-plane bundle 形态挂载；重启dsh后即生效。
 
 ### 本地开发安装
 
@@ -146,11 +146,11 @@ watch:
 - **dsh**：`onPreStep`（pre-step 边界注入）、`onSessionStart`（会话开始注入）、`promptSection`（系统提示词段落解释通知语义）
 - **Claude Code**：`onUserPrompt`（UserPromptSubmit 主通道）、`onStop`（Stop 补投，仅高优先级）、`staticOverview`（SessionStart 静态概述）
 
-配置文件落点（均约 100ms 热更新）：
+配置文件落点（均热更新，dsh 侧为 volatile 提交、不重启插件）：
 
 | 平台          | 全局                                         | 项目级覆盖                               |
 | ----------- | ------------------------------------------ | ----------------------------------- |
-| dsh         | `~/.dsh/settings.yaml` 的 `bright-drift:` 节 | `<workspace>/.dsh/bright-drift.yml` |
+| dsh（≥0.2.0，插件 ≥0.4.0） | `$DSH_HOME/profiles/<name>/cordis.patch.yml` 中 `- id: bright-drift` 行的 `config:`（跨 profile 写 `$DSH_HOME/cordis.patch.yml`；旧 `settings.yaml` 节在首次 0.2.0 启动时自动导入） | `<workspace>/.dsh/bright-drift.yml` |
 | Claude Code | `~/.claude/state/bright-drift/config.yml`  | `<repo>/.claude/bright-drift.yml`   |
 
 ## 工作原理

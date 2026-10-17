@@ -37,7 +37,7 @@ dsh plugin --profile web add bright-drift
 dsh plugin --profile headless add bright-drift
 ```
 
-Requires dsh ≥ 0.1.1-rc.2. The plugin mounts as a host-plane bundle; restart dsh and it's live.
+Requires dsh ≥ 0.2.0 (since bright-drift 0.4.0; on 0.1.x stay with bright-drift 0.3.x). The plugin mounts as a host-plane bundle; restart dsh and it's live.
 
 ### Development install
 
@@ -148,11 +148,11 @@ The `inject` section varies with each platform's injection channels:
 - **dsh**: `onPreStep` (inject at the pre-step boundary), `onSessionStart` (inject on session start), `promptSection` (system-prompt section explaining notice semantics)
 - **Claude Code**: `onUserPrompt` (UserPromptSubmit main channel), `onStop` (Stop top-up, high-priority only), `staticOverview` (SessionStart static overview)
 
-Config-file locations (both hot-reload in ~100 ms):
+Config-file locations (all hot-reload; on dsh edits commit as volatile config without remounting the plugin):
 
 | Platform     | Global                                        | Per-project override                       |
 | ------------ | --------------------------------------------- | ------------------------------------------ |
-| dsh          | `~/.dsh/settings.yaml`, under the `bright-drift:` key | `<workspace>/.dsh/bright-drift.yml`  |
+| dsh (≥0.2.0, plugin ≥0.4.0) | `config:` of the `- id: bright-drift` entry in `$DSH_HOME/profiles/<name>/cordis.patch.yml` (or `$DSH_HOME/cordis.patch.yml` across profiles; legacy `settings.yaml` sections are auto-imported on the first 0.2.0 boot) | `<workspace>/.dsh/bright-drift.yml`  |
 | Claude Code  | `~/.claude/state/bright-drift/config.yml`     | `<repo>/.claude/bright-drift.yml`          |
 
 ## How it works

@@ -3,11 +3,13 @@ import { promises as fs } from 'node:fs';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import {
+  Config,
   DEFAULT_CONFIG,
   ConfigResolver,
   mergeConfig,
   readProjectOverride,
-  settingsSchema,
+  snapshotConfig,
+  type PluginConfig,
 } from './config.js';
 
 describe('mergeConfig', () => {
@@ -52,15 +54,62 @@ describe('mergeConfig', () => {
   });
 });
 
-describe('settingsSchema', () => {
-  it('resolves defaults from undefined', () => {
-    expect(settingsSchema(undefined)).toEqual(DEFAULT_CONFIG);
+describe('Config schema + snapshotConfig (0.4.0, D10)', () => {
+  /** Parse raw patch data through the real schemastery schema. */
+  const parse = (raw: unknown): PluginConfig => Config(raw as Record<string, unknown>) as PluginConfig;
+
+  it('resolves defaults from empty input (volatile refs → plain snapshot)', () => {
+    const parsed = parse({});
+    // Volatile references, not plain values.
+    expect(typeof parsed.enabled.get).toBe('function');
+    expect(typeof parsed.budget.get).toBe('function');
+    expect(snapshotConfig(parsed)).toEqual(DEFAULT_CONFIG);
   });
 
-  it('accepts a user section', () => {
-    const resolved = settingsSchema({ inject: { onPreStep: false } });
+  it('accepts a user patch and keeps unspecified fields at defaults', () => {
+    const resolved = snapshotConfig(parse({ inject: { onPreStep: false } }));
     expect(resolved.inject.onPreStep).toBe(false);
     expect(resolved.inject.onSessionStart).toBe(true);
+  });
+
+  it('legacy settings.yaml section round-trips field-for-field (0.2.0 auto-import)', () => {
+    // A complete 0.1.x settings.yaml `bright-drift:` section. The host's
+    // legacy import feeds it to this schema verbatim; any field rename
+    // would reject the import and strand the user's config.
+    const legacy = {
+      enabled: false,
+      watch: { respectGitignore: false, extraIgnore: ['dist/**'], includeUntracked: true },
+      budget: { maxDiffLinesPerFile: 100, maxTotalDiffLines: 500, maxInjectTokens: 1500, maxDriftFilesForDiff: 20 },
+      diff: { contextLines: 5, maxFileSizeKB: 256, blacklist: ['*.env'] },
+      baseline: { maxEntries: 1000, persist: false, persistContent: false, contentStoreMaxMB: 64 },
+      inject: { onSessionStart: false, onPreStep: false, promptSection: false },
+      attribution: { bashWindowGraceMs: 2000, longCommandMs: 20000, formatterWindowMs: 500, formatterSilent: true },
+    };
+    expect(snapshotConfig(parse(legacy))).toEqual(legacy);
+  });
+
+  it('locks the section/leaf names against the legacy vocabulary', () => {
+    const resolved = snapshotConfig(parse({}));
+    expect(Object.keys(resolved).sort()).toEqual(
+      ['attribution', 'baseline', 'budget', 'diff', 'enabled', 'inject', 'watch'].sort(),
+    );
+    expect(Object.keys(resolved.watch).sort()).toEqual(['extraIgnore', 'includeUntracked', 'respectGitignore'].sort());
+    expect(Object.keys(resolved.budget).sort()).toEqual(
+      ['maxDiffLinesPerFile', 'maxDriftFilesForDiff', 'maxInjectTokens', 'maxTotalDiffLines'].sort(),
+    );
+    expect(Object.keys(resolved.diff).sort()).toEqual(['blacklist', 'contextLines', 'maxFileSizeKB'].sort());
+    expect(Object.keys(resolved.baseline).sort()).toEqual(
+      ['contentStoreMaxMB', 'maxEntries', 'persist', 'persistContent'].sort(),
+    );
+    expect(Object.keys(resolved.inject).sort()).toEqual(['onPreStep', 'onSessionStart', 'promptSection'].sort());
+    expect(Object.keys(resolved.attribution).sort()).toEqual(
+      ['bashWindowGraceMs', 'formatterSilent', 'formatterWindowMs', 'longCommandMs'].sort(),
+    );
+  });
+
+  it('a volatile reference reflects its parsed value via .get()', () => {
+    const parsed = parse({ diff: { blacklist: ['*.md'] } });
+    expect(parsed.diff.get()).toMatchObject({ contextLines: 3, blacklist: ['*.md'] });
   });
 });
 

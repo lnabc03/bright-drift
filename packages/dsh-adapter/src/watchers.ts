@@ -1,5 +1,5 @@
 import { WorkspaceWatcher, createIgnoreMatcher, type WatchEvent } from 'bright-drift-core';
-import type { TimerServiceLike } from './types.js';
+import type { TimerService } from '@deepseek-ai/cordis-plugin-timer';
 import type { BrightDriftConfig } from './config.js';
 import type { Logger } from './log.js';
 
@@ -25,7 +25,7 @@ export class WatchRegistry {
   private entries = new Map<string, WatchEntry>();
 
   constructor(
-    private readonly timer: TimerServiceLike | undefined,
+    private readonly timer: Pick<TimerService, 'debounce'> | undefined,
     private readonly logger: Logger,
   ) {}
 
@@ -66,7 +66,7 @@ export class WatchRegistry {
       ...(timer
         ? {
             debounceFactory: (fn: () => void, ms: number) => {
-              const debounced = timer.debounce(fn as (...args: never[]) => void, ms);
+              const debounced = timer.debounce(fn, ms);
               return () => debounced();
             },
           }

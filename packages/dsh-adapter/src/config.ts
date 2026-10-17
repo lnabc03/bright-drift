@@ -1,6 +1,8 @@
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import { parse as parseYaml } from 'yaml';
+import z from '@deepseek-ai/schemastery';
+import type { Volatile } from '@deepseek-ai/cordis';
 
 /** Resolved plugin configuration (design §5.9). */
 export interface BrightDriftConfig {
@@ -62,6 +64,116 @@ export const DEFAULT_CONFIG: BrightDriftConfig = {
   },
 };
 
+/**
+ * Declarative plugin Config consumed by the Cordis Loader (dsh 0.2.0, D10).
+ *
+ * Field names are byte-identical to the retired 0.1.x `settings.yaml`
+ * `bright-drift:` section — the host's one-shot legacy import maps sections
+ * to entry ids verbatim, so any rename would strand user config in
+ * `settings.yaml.imported` forever.
+ *
+ * `volatile()` goes on SECTIONS and LEAVES, never on the root object:
+ * a root-level volatile makes `Config({})` resolve to `{}` (defaults are
+ * not filled — probed against schemastery 3.18.4). All-volatile also keeps
+ * every config edit on the hot path (`loader/volatile-update`): an ordinary
+ * field change would remount the plugin and silently drop the unpersisted
+ * DriftQueue (§6.2 of the 0.2.0 audit).
+ *
+ * The schema validates types and fills defaults only — no min/max bounds —
+ * so a malformed patch is rejected by the compositor with a log line rather
+ * than changing runtime fail-open semantics.
+ */
+export const Config = z.object({
+  enabled: z.boolean().default(true).volatile()
+    .description('Master switch: watch workspaces and inject drift notices.'),
+  watch: z.object({
+    respectGitignore: z.boolean().default(true)
+      .description('Honor .gitignore rules when watching the workspace.'),
+    extraIgnore: z.array(z.string()).default([])
+      .description('Additional gitignore-style globs to silence completely (no drift records).'),
+    includeUntracked: z.boolean().default(false)
+      .description('Report creations of git-untracked files (non-git workspaces always report).'),
+  }).default({}).volatile().description('Filesystem watching.'),
+  budget: z.object({
+    maxDiffLinesPerFile: z.number().default(200)
+      .description('Per-file unified-diff line cap before truncation.'),
+    maxTotalDiffLines: z.number().default(1000)
+      .description('Total diff-line cap per injection; excess files degrade to list-only.'),
+    maxInjectTokens: z.number().default(2000)
+      .description('Approximate token cap per injection (4 chars ≈ 1 token).'),
+    maxDriftFilesForDiff: z.number().default(50)
+      .description('Above this many drifted files, inject a file-level list without diffs.'),
+  }).default({}).volatile().description('Injection budget and degradation ladder.'),
+  diff: z.object({
+    contextLines: z.number().default(3)
+      .description('Context lines around each diff hunk.'),
+    maxFileSizeKB: z.number().default(512)
+      .description('Files larger than this are tracked hash-only (no content, no diff).'),
+    blacklist: z.array(z.string()).default([])
+      .description('Gitignore-style globs whose diffs are suppressed (hash-only probe, content never stored).'),
+  }).default({}).volatile().description('Diff rendering and content capture.'),
+  baseline: z.object({
+    maxEntries: z.number().default(5000)
+      .description('AKB capacity per session (LRU beyond this).'),
+    persist: z.boolean().default(true)
+      .description('Persist AKB snapshots for session resume reconciliation.'),
+    persistContent: z.boolean().default(true)
+      .description('Keep sha1-addressed baseline content copies on disk for line-level diffs after resume.'),
+    contentStoreMaxMB: z.number().default(256)
+      .description('Content-store size cap; least-recently-used blobs are evicted beyond it.'),
+  }).default({}).volatile().description('Agent Knowledge Base persistence.'),
+  inject: z.object({
+    onSessionStart: z.boolean().default(true)
+      .description('Reconcile persisted baselines against disk when a session resumes.'),
+    onPreStep: z.boolean().default(true)
+      .description('Append drift notices to the model request at step boundaries.'),
+    promptSection: z.boolean().default(true)
+      .description('Contribute a static system-prompt section explaining drift-notice semantics.'),
+  }).default({}).volatile().description('Injection channels.'),
+  attribution: z.object({
+    bashWindowGraceMs: z.number().default(1500)
+      .description('Grace period after a shell command ends during which writes are attributed to it.'),
+    longCommandMs: z.number().default(10000)
+      .description('Commands longer than this keep their attribution window open for the whole run.'),
+    formatterWindowMs: z.number().default(1000)
+      .description('Cosmetic-only changes within this window after an agent write are reported as FORMATTED.'),
+    formatterSilent: z.boolean().default(false)
+      .description('Suppress FORMATTED notices entirely instead of listing them.'),
+  }).default({}).volatile().description('Drift attribution windows (bash/pwsh).'),
+});
+
+/**
+ * The shape `apply(ctx, config)` receives from the Loader: every section is
+ * a stable Volatile reference whose `.get()` yields an immutable snapshot.
+ */
+export interface PluginConfig {
+  enabled: Volatile<boolean>;
+  watch: Volatile<BrightDriftConfig['watch']>;
+  budget: Volatile<BrightDriftConfig['budget']>;
+  diff: Volatile<BrightDriftConfig['diff']>;
+  baseline: Volatile<BrightDriftConfig['baseline']>;
+  inject: Volatile<BrightDriftConfig['inject']>;
+  attribution: Volatile<BrightDriftConfig['attribution']>;
+}
+
+/**
+ * Resolve the volatile references into a plain config, filtered through
+ * mergeConfig so the result is always a complete, mutable BrightDriftConfig
+ * (volatile snapshots are recursively readonly and may omit nothing, but the
+ * filter keeps this function safe against shape drift in either direction).
+ */
+export function snapshotConfig(config: PluginConfig): BrightDriftConfig {
+  return mergeConfig(DEFAULT_CONFIG, {
+    enabled: config.enabled.get(),
+    watch: config.watch.get(),
+    budget: config.budget.get(),
+    diff: config.diff.get(),
+    baseline: config.baseline.get(),
+    inject: config.inject.get(),
+    attribution: config.attribution.get(),
+  });
+}
+
 type DeepPartial<T> = {
   [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]> : T[K];
 };
@@ -73,15 +185,6 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 }
 
 const isStrArr = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === 'string');
-
-/**
- * Schema function for ctx.settings.register (M0-6 verified: the settings
- * service calls `schema(mergedValue)`; a plain function suffices). Unknown
- * or wrongly-typed fields fall back to defaults instead of failing.
- */
-export function settingsSchema(value: unknown): BrightDriftConfig {
-  return mergeConfig(DEFAULT_CONFIG, asRecord(value));
-}
 
 /** Field-wise merge of a partial overlay onto a base config. */
 export function mergeConfig(

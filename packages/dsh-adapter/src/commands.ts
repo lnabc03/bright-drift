@@ -10,12 +10,13 @@ import {
   type RenderEntry,
 } from 'bright-drift-core';
 import type { ContentStore } from 'bright-drift-core';
+import type { CommandResult, CommandRuntime } from '@deepseek-ai/dsh-commands';
+import type { Agent } from '@deepseek-ai/dsh-agent';
 import type { StateRegistry, AgentState } from './state.js';
 import type { ConfigResolver } from './config.js';
 import { PROJECT_OVERRIDE_REL } from './config.js';
 import type { Logger } from './log.js';
 import type { WatchRegistry } from './watchers.js';
-import type { AgentLike, CommandsServiceLike } from './types.js';
 import type { AttributedDrift } from './pipeline.js';
 
 export interface CommandDeps {
@@ -25,8 +26,6 @@ export interface CommandDeps {
   contentStore: ContentStore;
   logger: Logger;
 }
-
-type CommandResult = { kind: 'success'; text?: string } | { kind: 'error'; text: string };
 
 function statusText(state: AgentState): string {
   const { stats } = state;
@@ -151,7 +150,7 @@ function nodiffList(state: AgentState, deps: CommandDeps): CommandResult {
 }
 
 /** /bright-drift status | diff <path> | pause | resume (§5.10). */
-export function registerCommands(commands: CommandsServiceLike, deps: CommandDeps): () => void {
+export function registerCommands(commands: CommandRuntime, deps: CommandDeps): () => void {
   return commands.register({
     name: 'bright-drift',
     description: 'workspace drift awareness: status / diff <path> / nodiff / pause / resume',
@@ -160,7 +159,7 @@ export function registerCommands(commands: CommandsServiceLike, deps: CommandDep
     // against dsh-commands built-ins: /permission, /feedback, /plan).
     input: { hint: '[status|diff <path>|nodiff add|remove|list [pattern]|pause|resume]' },
     handler: async (invocation): Promise<CommandResult> => {
-      const agent: AgentLike = invocation.agent;
+      const agent: Agent = invocation.agent;
       const state = deps.registry.get(agent);
       if (!state) return { kind: 'error', text: 'bright-drift: 当前会话未初始化（尚无 workspace root）' };
 

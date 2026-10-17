@@ -8,10 +8,11 @@ import { StateRegistry, type AgentState } from './state.js';
 import { ConfigResolver, DEFAULT_CONFIG, PROJECT_OVERRIDE_REL } from './config.js';
 import { Logger } from './log.js';
 import { WatchRegistry } from './watchers.js';
-import type { AgentLike } from './types.js';
+import { fakeAgent } from './testkit.js';
+import type { Agent } from '@deepseek-ai/dsh-agent';
 
 type Result = { kind: 'success'; text?: string } | { kind: 'error'; text: string };
-type Handler = (invocation: { agent: AgentLike; rawInput: string }) => Promise<Result>;
+type Handler = (invocation: { agent: Agent; rawInput: string }) => Promise<Result>;
 
 let ws: string;
 let storeDir: string;
@@ -19,7 +20,7 @@ let state: AgentState;
 let registry: StateRegistry;
 let resolver: ConfigResolver;
 let logger: Logger;
-let agent: AgentLike;
+let agent: Agent;
 let handler: Handler;
 
 beforeEach(async () => {
@@ -28,7 +29,7 @@ beforeEach(async () => {
   logger = new Logger(storeDir);
   registry = new StateRegistry();
   resolver = new ConfigResolver();
-  agent = { session: { id: 'sess-cmd', header: { cwd: ws } } };
+  agent = fakeAgent('sess-cmd', ws);
   state = registry.getOrCreate(agent, ws, DEFAULT_CONFIG);
   const commands = {
     register: (def: { handler: Handler }) => {
@@ -36,7 +37,7 @@ beforeEach(async () => {
       return () => {};
     },
   };
-  registerCommands(commands, {
+  registerCommands(commands as never, {
     registry,
     resolver,
     watchers: new WatchRegistry(undefined, logger),

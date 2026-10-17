@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import {
   createFileDiff,
   createPatternMatcher,
@@ -13,11 +12,14 @@ import {
   type RenderEntry,
 } from 'bright-drift-core';
 import type { ContentStore } from 'bright-drift-core';
+import { boundContextSummary, createUserMessage, type UserMessage } from '@deepseek-ai/dsh-llm';
+import type { Events } from '@deepseek-ai/cordis';
+import type {} from '@deepseek-ai/dsh-agent'; // registers agent/* events on Events
 import type { AgentState, StateRegistry } from './state.js';
 import type { ConfigResolver, BrightDriftConfig } from './config.js';
 import type { Logger } from './log.js';
 import type { AttributedDrift } from './pipeline.js';
-import type { PluginUserMessage, PreStepDecision, PreStepListener } from './types.js';
+import './types.js'; // MessageSourceMap: declares the 'bright-drift' source kind
 
 export interface InjectDeps {
   registry: StateRegistry;
@@ -25,6 +27,9 @@ export interface InjectDeps {
   contentStore: ContentStore;
   logger: Logger;
 }
+
+/** Host-typed pre-step waterfall listener (0.4.0: tracks the real Events map). */
+export type PreStepListener = Events['agent/pre-step'];
 
 /** Load the baseline content copy for a record, memory cache → disk store (E18). */
 async function loadBaselineContent(
@@ -50,7 +55,7 @@ export async function buildInjection(
   state: AgentState,
   config: BrightDriftConfig,
   deps: InjectDeps,
-): Promise<PluginUserMessage | null> {
+): Promise<UserMessage | null> {
   const peeked = state.queue.peek() as AttributedDrift[];
   if (peeked.length === 0) return null;
 
@@ -182,17 +187,16 @@ export async function buildInjection(
     tokens: estimateTokens(rendered.text),
   });
 
-  return {
-    id: randomUUID(),
-    role: 'user',
+  return createUserMessage({
     content: [{ type: 'text', text: rendered.text }],
     source: {
-      kind: 'plugin',
-      plugin: 'bright-drift',
+      // 0.2.0: no shared 'plugin' kind — every producer declares its own
+      // (MessageSourceMap augmentation in ./types.ts; F2/D10).
+      kind: 'bright-drift',
       form: 'notice',
-      summary: rendered.summary,
+      summary: boundContextSummary(rendered.summary),
     },
-  };
+  });
 }
 
 /**

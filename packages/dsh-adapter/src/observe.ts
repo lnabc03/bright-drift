@@ -8,16 +8,17 @@ import {
   type SnapshotEntry,
 } from 'bright-drift-core';
 import type { ContentStore } from 'bright-drift-core';
+import type {
+  PostToolDecision,
+  PreToolDecision,
+  ToolExecution,
+  ToolExecutionResult,
+} from '@deepseek-ai/dsh-tools';
+import type { FileSystem, FsObservation, FsTarget } from '@deepseek-ai/dsh-fs';
 import type { AgentState, StateRegistry } from './state.js';
 import type { ConfigResolver } from './config.js';
 import type { Logger } from './log.js';
-import type {
-  FsObservationLike,
-  FsServiceLike,
-  FsTargetLike,
-  ToolExecLike,
-  ToolResultLike,
-} from './types.js';
+import type { FsActorLike, ToolArguments } from './types.js';
 
 export interface ObserveDeps {
   registry: StateRegistry;
@@ -27,7 +28,7 @@ export interface ObserveDeps {
   /** 'bash' on POSIX, 'pwsh' on Windows (AGENTS.md §4.5). */
   shellToolName: 'bash' | 'pwsh';
   /** Optional fs service for fs/observed path resolution (§5.2.3). */
-  fsService?: FsServiceLike | undefined;
+  fsService?: Pick<FileSystem, 'processPath'> | undefined;
 }
 
 const READ_TOOLS = new Set(['read', 'read_image']);
@@ -97,8 +98,10 @@ async function updateBaseline(
 }
 
 /** tools/result listener (emit): AKB observation main channel (F1). */
-export function makeToolsResultListener(deps: ObserveDeps) {
-  return (exec: ToolExecLike, result: ToolResultLike): void => {
+export function makeToolsResultListener(
+  deps: ObserveDeps,
+): (exec: ToolExecution, result: ToolExecutionResult) => undefined {
+  return (exec, result) => {
     try {
       const agent = exec.agent;
       if (!agent) return;
@@ -108,12 +111,13 @@ export function makeToolsResultListener(deps: ObserveDeps) {
       if (result.isError) return;
 
       if (READ_TOOLS.has(exec.name) || WRITE_TOOLS.has(exec.name)) {
-        const rel = resolveToolPath(state, exec.arguments.file_path);
+        const args = exec.arguments as ToolArguments;
+        const rel = resolveToolPath(state, args.file_path);
         if (rel === null) return;
         const partial =
           exec.name === 'read_image' ||
           (exec.name === 'read' &&
-            (exec.arguments.offset !== undefined || exec.arguments.limit !== undefined));
+            (args.offset !== undefined || args.limit !== undefined));
         const source = READ_TOOLS.has(exec.name) ? 'read' : 'write';
         void updateBaseline(state, rel, source, partial, exec.callId, deps).catch((e) =>
           deps.logger.error('baseline.update', e, { sessionId: state.sessionId, path: rel }),
@@ -146,17 +150,17 @@ async function snapshotTracked(state: AgentState, predicted: string[]): Promise<
  * tools/pre-execute listener (waterfall): open the FR-7 attribution window
  * for foreground/background shell calls, then delegate (decisions untouched).
  */
-export function makePreExecuteListener(deps: ObserveDeps) {
-  return async (
-    exec: ToolExecLike,
-    next: () => Promise<unknown>,
-  ): Promise<unknown> => {
+export function makePreExecuteListener(
+  deps: ObserveDeps,
+): (exec: ToolExecution, next: () => Promise<PreToolDecision>) => Promise<PreToolDecision> {
+  return async (exec, next) => {
     try {
       if (exec.name === deps.shellToolName && exec.agent) {
         const state = deps.registry.get(exec.agent);
         if (state) {
-          const command = typeof exec.arguments.command === 'string' ? exec.arguments.command : '';
-          const background = exec.arguments.run_in_background === true;
+          const args = exec.arguments as ToolArguments;
+          const command = typeof args.command === 'string' ? args.command : '';
+          const background = args.run_in_background === true;
           const predicted = analyzeCommand(deps.shellToolName, command)
             .map((p) => (path.isAbsolute(p) ? toRelativeKey(state.workspaceRoot, p) : p.split(path.sep).join('/')))
             .filter((p): p is string => p !== null);
@@ -186,12 +190,14 @@ export function makePreExecuteListener(deps: ObserveDeps) {
 }
 
 /** tools/post-execute listener (waterfall): close the FR-7 window (grace handled by core). */
-export function makePostExecuteListener(deps: ObserveDeps) {
-  return async (
-    exec: ToolExecLike,
-    _result: unknown,
-    next: (value?: unknown) => Promise<unknown>,
-  ): Promise<unknown> => {
+export function makePostExecuteListener(
+  deps: ObserveDeps,
+): (
+  exec: ToolExecution,
+  result: Readonly<ToolExecutionResult>,
+  next: () => Promise<PostToolDecision>,
+) => Promise<PostToolDecision> {
+  return async (exec, _result, next) => {
     try {
       if (exec.name === deps.shellToolName && exec.agent) {
         deps.registry.get(exec.agent)?.attributor.closeWindow(exec.callId);
@@ -216,11 +222,13 @@ export function makePostExecuteListener(deps: ObserveDeps) {
  * version (§5.2.3). The short-circuit is an optional micro-optimization with
  * real write-guard-interaction risk, so phase 1 opts out.
  */
-export function makeFsObservedListener(deps: ObserveDeps) {
-  return (target: FsTargetLike, observation: FsObservationLike, actor: unknown): void => {
+export function makeFsObservedListener(
+  deps: ObserveDeps,
+): (target: FsTarget, observation: FsObservation, actor: object | undefined) => void {
+  return (target, observation, actor) => {
     try {
       if (observation.kind !== 'absent') return;
-      const agent = (actor as ToolExecLike | undefined)?.agent;
+      const agent = (actor as FsActorLike | undefined)?.agent;
       if (!agent) return;
       const state = deps.registry.get(agent);
       if (!state) return;

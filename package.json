@@ -12,5 +12,14 @@
   },
   "devDependencies": {
     "typescript": "^5.6.0"
+  },
+  "pnpm": {
+    "peerDependencyRules": {
+      "//": "dsh-adapter devDeps intentionally pin the versions shipped inside the installed dsh 0.2.0-rc.2 host (cordis 4.0.4, loader 1.0.5); cordis-plugin-include/group ask for newer but are never loaded from this tree at runtime.",
+      "allowedVersions": {
+        "@deepseek-ai/cordis": "4.0.4",
+        "@deepseek-ai/cordis-plugin-loader": "1.0.5"
+      }
+    }
   }
 }

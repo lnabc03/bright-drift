@@ -31,12 +31,12 @@ PRD 的技术路线**成立**：dsh 的 Cordis 事件体系提供了 PRD §4.1 �
 | # | 能力 | 设计采纳点 |
 |---|---|---|
 | F1 | `tools/result`（emit，冻结的最终结果）——官方 `dsh-agent-instructions` 插件即用此事件跟踪 read/write/edit 的文件触碰 | AKB 观察主通道（§5.2），替代 PRD 的 post-execute 独用方案 |
-| F2 | `MessageSource` 的 `form` 词汇：`'notice'`（一件事的一次性通报，UI 折叠为一行，须带 ≤120 字符 `summary`）——比裸 `{kind:'plugin'}` 更贴合漂移通知 | 注入消息一律 `form:'notice'`（§5.5） |
-| F3 | `agent.inject(message)`：不唤醒 driver、下一 step 边界领取——`agent/session-start` 文档明确推荐 | 保留为备用通道；主通道仍为 pre-step waterfall（§5.5） |
+| F2 | `MessageSource` 的 `form` 词汇：`'notice'`（一件事的一次性通报，UI 折叠为一行，须带 ≤120 字符 `summary`）——比裸 `{kind:'plugin'}` 更贴合漂移通知。⚠️ **0.2.0 修订**：`MessageSourceMap` 不再有任何共享 `plugin` 兜底 kind，每个生产者须以模块增强自声明 `kind`（官方先例：`dsh-time-context` 声明 `'time-context'`），并改用 `createUserMessage()` + `boundContextSummary()` 构造 | 注入消息 `kind:'bright-drift'` + `form:'notice'`（§5.5） |
+| F3 | `agent.inject(message)`：不唤醒 driver、下一 step 边界领取——0.1.x 的 `agent/session-start`（0.2.0 起为 `agent/created`）文档明确推荐 | 保留为备用通道；主通道仍为 pre-step waterfall（§5.5） |
 | F4 | `PostToolDecision.additionalContexts` / `ToolRunContext.deferContext`：工具结果后追加上下文（repeat-tool-reminder 先例） | 评估后**不采用**（保持单一注入路径与单一 Sync Point，见 §5.5.4） |
 | F5 | `fs/observed`（emit）：read/write/edit 工具对目标的权威观察（present+version / absent） | AKB 版本信号的补充通道（§5.2.3） |
 | F6 | `ctx.commands.register`：斜杠命令注册表，handler 返回文本直接渲染 | `/bright-drift` 命令族（§5.10） |
-| F7 | `ctx.settings.register(ns, schema)`：用户级 settings 命名空间，schema 校验 + 热更新 + Web 设置 UI | 配置主通道（§5.9） |
+| F7 | ~~`ctx.settings.register(ns, schema)`~~ ⚠️ **0.2.0 已移除**：settings 服务重写为 `SettingsForms`（无 register），`~/.dsh/settings.yaml` 废弃。替代能力：**声明式插件 `Config`**（schemastery schema，`volatile()` 节点热更新 + `loader/volatile-update` 事件，配置落 `$DSH_HOME/profiles/<name>/cordis.patch.yml` 的 entry `config:`） | 配置主通道（§5.9，0.4.0 起） |
 | F8 | `ctx.timer`：debounce/throttle/interval，随 fiber 自动 dispose | watcher 防抖（§5.3） |
 | F9 | 依赖树已含 `chokidar@4.0.3` 与 `diff@9.0.0` | 版本对齐声明（§5.11） |
 | F10 | **turn 正常关闭不触发尾部空批次 pre-step**：上一步无工具调用且收件箱空时，loop 在该步结束后直接 `turn-stopping` → `break`（L564–571），不再有下一次 pre-step。空批次 pre-step 只出现在：工具循环延续步（`turnEnds` 未置位，step 本来就要跑）、L542（max-tokens 后续转向批次被领空）、L543（turn 首次领取为空即 completed 退出，无 step） | M0-2 实测 + 源码复核 → §5.5.3 机制修订 |
@@ -46,7 +46,7 @@ PRD 的技术路线**成立**：dsh 的 Cordis 事件体系提供了 PRD §4.1 �
 | # | 决策点 | 结论 |
 |---|---|---|
 | D1 | 挂载平面 | **Host 平面 Bundle**：npm 包声明 `dsh.bundle.patch`，`dsh plugin --profile web add bright-drift` 安装；单例插件在 root ctx 监听（dsh-scope 事件准入向上传播，未打标签的监听者接收所有 agent 的 scope 事件），按 `Agent` 对象 WeakMap 分键管理全部会话 |
-| D2 | 配置通道 | **settings 命名空间 + 项目级覆盖**：全局默认 `~/.dsh/settings.yaml` 的 `bright-drift` 节（热更新、Web UI 可见）；插件自读 `<workspace>/.dsh/bright-drift.yml` 作为项目级覆盖，项目级优先 |
+| D2 | 配置通道 | **声明式 Config + 项目级覆盖**（0.4.0 起，适配 dsh 0.2.0）：全局默认走 Cordis Loader——插件导出 schemastery `Config`（**section 级 `.volatile()`**，禁止根节点 volatile，后者会使默认值不再填充），用户配置写 `$DSH_HOME/profiles/<name>/cordis.patch.yml` 的 `- id: bright-drift` 行 `config:`（热更新经 `loader/volatile-update` 即时生效，不 remount → 不丢待注入队列）；插件自读 `<workspace>/.dsh/bright-drift.yml` 作为项目级覆盖，项目级优先。0.1.x 的 `settings.register` 通道与 `settings.yaml` 已随 0.2.0 废弃；旧 `bright-drift:` 节由 dsh 启动迁移逻辑按 entry id 自动导入 patch（字段名逐字一致 → 无损） |
 | D3 | 基线内容存储 | **内存副本 + 磁盘 content-store**：sha1 寻址 blob 落 `~/.dsh/state/bright-drift/blobs/`，容量上限 + LRU 清理；跨会话 resume 仍可行级 diff；content-store 被禁用/淘汰时按 PRD 原案降级为文件级提示 |
 | D4 | 客户端 UI | 一期**纯 Host + 斜杠命令**；漂移状态面板留 v1.1 |
 | D5 | FR-7 范围 | **前台 bash + pwsh 全做**（Windows 上 dsh 的 shell 工具是 `pwsh`，重定向/写入语法单独覆盖）；`run_in_background` 后台任务窗口存活期不定，一律标 ambiguous-external |
@@ -54,6 +54,7 @@ PRD 的技术路线**成立**：dsh 的 Cordis 事件体系提供了 PRD §4.1 �
 | D7 | includeUntracked 落地（2026-09 追加） | created 闸门：git 仓库内对「AKB 未知且磁盘存在」的候选路径做**惰性批量** `git ls-files -z -- <paths>` 判定（按 watcher 批次合并为单进程调用，非启动时全量建集）；未追踪且未被归因窗口预测的路径不入队。非 git 工作区 / git 不可用 → 无法区分 → created **全部上报**（保住该场景的认知同步价值，G1 优先于降噪） |
 | D8 | 静态分析接线（2026-09 追加） | FR-7.2 预测路径的两个生产作用：(a) 豁免 D7 的 created 闸门——命令自建文件（多为未追踪）必须照常上报 B 类；(b) 窗口关闭 + grace 之后、`longCommandMs` 之内落盘的预测路径写入归 **ambiguous-external**（措辞含命令原文，§3.6 不对称偏向），超出按 C 类。`classify` 扩展为 `classify(at, path?)`；`prune` 保留仍处于预测 horizon 内的已关窗。不新增配置键 |
 | D9 | diff 黑名单（2026-09 追加） | 用户手动兜底：`diff.blacklist`（gitignore 风格 glob，与 extraIgnore 同语法）。语义**只压 diff、保留文件级通知**（与 watch 层 extraIgnore 的「完全静默」差异化；不违 G1）；执行点在**探针层 hash-only**——黑名单文件只算哈希不取内容，内容不进 AKB 内存、不落 content-store（覆盖 .env 类敏感场景；E1 回声抑制仍精确）。默认为空，不替用户做主张。命令通道：`/bright-drift nodiff add\|remove\|list` 写入项目级 override 文件，借 §5.9 既有热重载闭环即时生效 |
+| D10 | dsh 0.2.0 适配（2026-10 追加，0.4.0） | **事件迁移**：`agent/session-start` 已删除（无 shim），会话初始化改挂 `agent/created`（serial、awaited——listener 必须同步、不抛、显式 `return undefined`；payload 同构 `{agent, source, signal?}`）；新增 `agent/disposed` 监听与 `session/disposed` 互为幂等清理（web 可能先退役 agent 而 session 留存，漏听会泄漏 watcher refcount）；`session/disposed` payload 从 `{id}` 变为 `Session` 对象（`.id` 兼容）。**不做双兼容**（不写 0.1.x 回退通道）：0.2.0 里旧事件/旧服务永不出现，用 `peerDependencies`（cordis ^4.0.4、schemastery ^3.18.1、dsh-* >=0.2.0-rc.1 <0.3.0-0）让 0.1.x 用户在安装期被拒绝而非运行期静默失效。**配置热更新必须全 volatile**（§6.2 风险：非 volatile 变更触发 remount = dispose+apply，而 DriftQueue 不持久化 → 未注入漂移静默丢失）。**类型契约**：adapter 生产代码直接消费 dsh 真实 `.d.ts` 类型（弃用手写结构 shim），另加 `src/contract.ts` 负向断言（`@ts-expect-error` 锁定已移除 API），tsc 即契约测试 |
 
 ---
 
@@ -85,16 +86,16 @@ N1–N5 保留。补充：
 | `tools/pre-execute`：waterfall，决策仅 `allow/deny/ask`，不可改参数 | `dsh-tools` types |
 | `tools/post-execute`：waterfall，`(exec, result, next)`，`exec` 含 name/深冻结 arguments/agent/signal；`result` 为 `ToolExecutionResult`（`value`/`content`/`additionalContexts`） | `dsh-tools` types |
 | `tools/result`：emit，冻结终态，fire-and-forget | 同上 |
-| `agent/session-start`：emit，`source: 'startup'\|'resume'\|'clear'\|'compact'`，文档明示用 `agent.inject()` 播种上下文 | `dsh-agent` runtime-types.d.ts |
+| `agent/created`（0.2.0 起；0.1.x 的 `agent/session-start` 已删除无 shim）：**serial**（逐一 await，抛错/拒绝会 fail agent 创建），payload `{agent, source: 'startup'\|'resume'\|'clear'\|'compact', signal?}`，返回类型 `undefined \| Promise<undefined>`——listener 须同步快速返回，重活 fire-and-forget | `dsh-agent` runtime-types.d.ts L215–231 |
 | `agent/turn-stopping`：serial，turn 提交前 await | 同上 |
-| `session/disposed`：emit | `dsh-session` |
+| `session/disposed`：emit；0.2.0 起 payload 为 `Session` 对象（不再是 `{id}` 包装，`.id` 照旧可用）；另补 `agent/disposed`（emit，`{agent}`）——agent 可先于 session 退役 | `dsh-session` types L52；`dsh-agent` runtime-types.d.ts L240 |
 | `Agent.inject(message)`：不唤醒，下一 step 边界领取；idle 时挂起至下次唤醒 | `dsh-agent-loop` agent.d.ts |
 | 工作区根：`agent.session.header.cwd`（`dsh-agent-instructions` 先例）；兜底 `ctx.sandboxPolicy.workspaceRoot` | `dsh-session` types；`dsh-sandbox-policy` |
 | 事件作用域：scope 事件准入向上传播；root（未打标签）监听者接收所有 agent 的事件；`this` 为 `Scoped<Agent>`，payload 携带 agent | `dsh-scope/README.md` |
-| 注入消息 source：`{kind:'plugin', plugin:'bright-drift', form:'notice', summary}`，`summary` ≤120 字符 | `dsh-llm` message.d.ts |
+| 注入消息 source（0.4.0 起）：`{kind:'bright-drift', form:'notice', summary}`——`MessageSourceMap` 模块增强自声明生产者 kind（无共享 `plugin` 兜底），消息用 `createUserMessage()` 构造（fresh id + freeze），`summary` 经 `boundContextSummary()` 截至 ≤120 字符 | `dsh-llm` message.d.ts L94–122、L213；`dsh-time-context` 先例 |
 | 官方先例插件：`dsh-time-context`/`dsh-tmux-context`（pre-step 追加 sourced UserMessage）、`dsh-repeat-tool-reminder`（post-execute + WeakMap 分键）、`dsh-agent-instructions`（tools/result 观察 + `ctx.fs` 可选消费 + `header.cwd`） | 各包 README |
 | 分发：profile = `$DSH_HOME/profiles/<name>/`（`$DSH_HOME` else `~/.dsh`）；bundle = 声明 `dsh.bundle.patch` 的 npm 包；patch 支持 `insert` 加行 | `dsh-app-boot/README.md` |
-| `dsh-settings-file`：`~/.dsh/settings.yaml`，命名空间节、原子写、watch 热更新、Web UI | `dsh-settings-file/README.md` |
+| 插件配置（0.2.0 起）：声明式 `Config`（schemastery）+ Loader patch 分层——`$DSH_HOME/cordis.patch.yml`（跨 profile）与 `$DSH_HOME/profiles/<name>/cordis.patch.yml`（单 profile）的 entry `config:`；`volatile()` 节点（**标在 section/叶子，不可标根对象**）解析为 `Volatile<T>` 引用（`.get()` 取快照），纯 volatile 编辑热提交并发 `loader/volatile-update`（按 fiber 过滤，只收自己的），普通字段变更会 remount；0.1.x 的 `dsh-settings-file`/`settings.yaml` 已废弃（旧文件启动时按 entry id 一次性导入后改名 `settings.yaml.imported`） | `cordis-plugin-loader` types L29 + lib L380–425；`cosmokit` volatile.d.ts；`dsh-settings` lib |
 
 ---
 
@@ -115,11 +116,11 @@ N1–N5 保留。补充：
 │   prepend 监听，      │ 追加进 enter                                               │            │
 │   先 next() 后追加）  └──── Sync Point：AKB 对账 + 清队列 ◄────────────────────────┘            │
 │                                                                                                │
-│  agent/session-start ──► Reconciler：磁盘全量扫描 vs 持久化 AKB（resume 场景）                   │
+│  agent/created ──────► Reconciler：磁盘全量扫描 vs 持久化 AKB（resume 场景）                   │
 │  agent/turn-stopping ──► Persister：AKB 落盘（原子写）                                          │
-│  session/disposed ─────► 清理 watcher 引用、最终落盘                                            │
+│  agent/disposed + session/disposed ─► 幂等清理 watcher 引用、最终落盘                           │
 │  /bright-drift 命令 ───► status / diff <path> / pause / resume                                 │
-│  settings + 项目级 yml ─► ConfigResolver（项目级优先）                                          │
+│  Loader Config(volatile) + 项目级 yml ─► ConfigResolver（项目级优先）                           │
 └────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -253,15 +254,17 @@ ctx.on('agent/pre-step', async (payload, next) => {
 });
 ```
 
-注入消息 source（F2）：
+注入消息 source（F2，0.4.0 起）：
 
 ```ts
-{
-  kind: 'plugin',
-  plugin: 'bright-drift',
-  form: 'notice',
-  summary: '工作区漂移：3 个文件变更（2 外部修改 / 1 命令副作用）'  // ≤120 字符，UI 折叠行
-}
+createUserMessage({
+  content: [{ type: 'text', text }],
+  source: {
+    kind: 'bright-drift',   // MessageSourceMap 模块增强自声明（0.2.0 起无共享 'plugin' kind）
+    form: 'notice',
+    summary: boundContextSummary('工作区漂移：3 个文件变更（2 外部修改 / 1 命令副作用）')  // ≤120 字符，UI 折叠行
+  }
+})
 ```
 
 #### 5.5.2 Sync Point 时机
@@ -291,11 +294,11 @@ ctx.on('agent/pre-step', async (payload, next) => {
 #### 5.5.4 已评估并放弃的通道
 
 - `PostToolDecision.additionalContexts` / `deferContext`（F4）：能在工具结果后立刻追加上下文，但它在 turn 收尾时同样会追加消息，且引入第二条注入路径 = 第二个 Sync Point 语义。单一通道优先，放弃。
-- `agent.inject()`（F3）：无法感知「何时被领取」，Sync Point 不可控。仅保留为 session-start 的文档兼容手段——实际实现中 session-start 对账结果同样走 DriftQueue → 首个 pre-step 注入，不直接使用 inject()。
+- `agent.inject()`（F3）：无法感知「何时被领取」，Sync Point 不可控。仅保留为 `agent/created` 的文档兼容手段——实际实现中 created 对账结果同样走 DriftQueue → 首个 pre-step 注入，不直接使用 inject()。
 
 #### 5.5.5 冷启动对账（FR-3.3 修订）
 
-`agent/session-start`（含 `source:'resume'`，覆盖 T7/E11）：从持久化加载该 sessionId 的 AKB → 异步全量对账（仅 stat+hash AKB 内路径，不做全树扫描）→ 漂移入队。pre-step 不等待对账完成（首个请求不被阻塞）；对账慢于首个 pre-step 时顺延到下一个注入点，可接受。
+`agent/created`（0.4.0 起；0.1.x 为 `agent/session-start`；含 `source:'resume'`，覆盖 T7/E11）：从持久化加载该 sessionId 的 AKB → 异步全量对账（仅 stat+hash AKB 内路径，不做全树扫描）→ 漂移入队。pre-step 不等待对账完成（首个请求不被阻塞）；对账慢于首个 pre-step 时顺延到下一个注入点，可接受。注意 `agent/created` 是 serial 事件：listener 本体只做同步的 registry/watcher 簿记并 `return undefined`，对账与加载全部 fire-and-forget（抛错会 fail agent 创建，G5 要求外层 try/catch）。
 
 #### 5.5.6 系统提示词段落（2026-08-31 新增，`inject.promptSection`，默认开）
 
@@ -350,14 +353,21 @@ FORMATTED  src/util.ts（保存时自动格式化，仅空白差异）
 - blob 按内容寻址，跨会话/跨 workspace 共享；`session/disposed` 后 AKB json 保留（供 resume），孤儿 blob 由 LRU 容量清理。
 - 多会话并发同一工作区（PRD R6）：AKB 按会话隔离，天然无互相覆盖；watcher 共享只读。R6 降级为「已解决（一期语义内）」。
 
-### 5.9 配置（修订 FR-5，D2）
+### 5.9 配置（修订 FR-5，D2；0.4.0 起适配 dsh 0.2.0）
 
-**主通道**：`ctx.settings.register('bright-drift', schema)` → `~/.dsh/settings.yaml` 的 `bright-drift:` 节；schema 校验、热更新（`settings/updated` 事件即时生效）、Web 设置 UI 可见。
+**主通道（0.2.0 形态）**：插件导出声明式 `Config`（schemastery schema）→ 用户配置写在 `$DSH_HOME/profiles/<name>/cordis.patch.yml` 的 `- id: bright-drift` 行 `config:`（跨 profile 全局写 `$DSH_HOME/cordis.patch.yml`）。要点：
 
-**项目级覆盖**：插件自读 `<workspace>/.dsh/bright-drift.yml`（chokidar 顺带 watch，变更即重读），逐字段覆盖全局值。
+- **volatile 标在 section 与叶子上，禁止标根对象**——实测 `z.object({…}).volatile()` 会使 `Config({})` 解析为 `{}`（默认值不填充）；section 级 `.default({}).volatile()` 行为正确。
+- volatile 节点在 `apply(ctx, config)` 的入参里是 `Volatile<T>` 引用，读值必须 `.get()`（快照递归 readonly）；`snapshotConfig()` 把引用解析为普通 `BrightDriftConfig` 后交给 `ConfigResolver`。
+- 热更新：`ctx.on('loader/volatile-update', applyConfig)`。该事件按 fiber 过滤（只收自己的变更），纯 volatile 编辑**不 remount**——这是硬要求：`saveAgentState` 只持久化 AKB + 归因窗口，不持久化 DriftQueue，remount 会静默丢掉未注入的漂移。
+- 每个字段带 `.description()`（英文），供设置表单/文档展示。注意 0.2.0 没有随附客户端渲染 `autoGenerate` schema 表单，**没有免费设置页**；配置入口 = YAML patch（主）+ 项目级文件（辅）。
+- 字段名与 0.1.x `settings.yaml` 的 `bright-drift:` 节**逐字一致**——dsh 启动时按 entry id 把旧节导入 profile patch（导入后旧文件改名 `settings.yaml.imported`），字段名若变，导入会被拒绝且用户配置永久搁浅。
+- schema 只做类型校验 + 默认值，不加 min/max 约束（0.1.x 的 mergeConfig 语义是"错类型回落默认"，0.2.0 下非法值会被 compositor 拒绝并记日志，不 crash 插件加载之外的任何东西——保持宽松即保持 fail-open）。
+
+**项目级覆盖**（不变）：插件自读 `<workspace>/.dsh/bright-drift.yml`（chokidar 顺带 watch，变更即重读），逐字段覆盖全局值。
 
 ```yaml
-# settings.yaml 节 / 项目级文件同构
+# profile patch 的 entry config: / 项目级文件同构
 enabled: true
 watch:
   respectGitignore: true
@@ -443,10 +453,20 @@ T1–T10 保留，修订与新增：
 | T7 跨会话 | 断言升级（D3）：resume 后 content-store 命中 → **行级 diff 注入**；blob 被淘汰时降级为文件级（两条断言） |
 | T9 命令归因 | 分平台跑：POSIX 用 `bash`，Windows 用 `pwsh`（含 `Set-Content` 写入变体） |
 | T11（新）turn 收尾抑制 | agent 完成无工具调用的收尾回答时队列有漂移 → 断言无额外模型请求；下一 turn 首步注入 |
-| T12（新）notice 形态 | 注入消息 source 为 `{kind:'plugin', plugin:'bright-drift', form:'notice'}` 且 summary ≤120 字符 |
+| T12（新）notice 形态 | 注入消息 source 为 `{kind:'bright-drift', form:'notice'}`（0.4.0 起；此前 `{kind:'plugin', plugin:'bright-drift'}`）且 summary ≤120 字符 |
 | T13（新）后台任务歧义 | `run_in_background` 命令写文件 → ambiguous-external 且措辞含「后台任务」 |
 
 验收标准（PRD §2.3）相应修订：第 2 条「B 类归因准确率 ≥95%」的测试集明确为 T9（bash）+ T9′（pwsh）；其余不变。
+
+### 7.1 0.4.0 增补：防回归两层防线（D10，2026-10）
+
+0.1.x → 0.2.0 的全部破坏（事件删除、服务方法移除、payload 变形、source 词汇表变化）之所以能穿过 32 个 mock 单测，是因为旧套件只断言"我方实现的契约"。0.4.0 起新增三层：
+
+1. **类型契约（编译期）**：adapter 生产代码直接消费 dsh 真实 `.d.ts`（弃用手写 shim）；`src/contract.ts` 正向钉住全部宿主接触面（事件名/payload/返回类型/服务形状），并用 `@ts-expect-error` 负向锁定 0.2.0 已删除的 `agent/session-start` 与 `settings.register`——宿主若改名或复活旧 API，tsc 立即失败。
+2. **装配层单测（`src/index.test.ts`）**：mock Context 驱动 `apply()` 全装配——事件注册集合与 `{prepend:true}`、`agent/created` 返回 `undefined`、`enabled:false` 不挂 watcher、`agent/disposed`+`session/disposed` 幂等清理、`loader/volatile-update` 重应用不 remount、日志零 `.error`。
+3. **启动冒烟（`pnpm --filter bright-drift smoke`，运行期）**：隔离 `DSH_HOME` + 非 shipped profile + declarative agent（不调模型）+ 本地 junction 安装，断言 `plugin.applied/config.applied/session.start/watcher.acquired` 且无 `*.error`；随后编辑 profile patch 验证 volatile 热更新（第二次 `config.applied`、无 `plugin.disposed`）；再制造外部文件创建验证 watcher→`drift.detected` 链路（T1 检测半边；注入半边仍需模型 E2E）。
+
+模型驱动的 T1–T13 矩阵仍按本节执行（冒烟不替代之）。
 
 ---
 
@@ -458,10 +478,10 @@ T1–T10 保留，修订与新增：
 
 1. ✅ pre-step `enter` 追加消息端到端可见：探针在 step 85（空批次延续步）追加 notice 消息，持久化为 `user/message` 并被模型在下一步引用（标记回读成功）。`{prepend: true}` + 先 `next()` 后追加的官方模式（time-context）实测有效。
 2. ✅ §5.5.3 关闭边界：实测 turn 3 正常关闭**无尾部空批次 pre-step**（loop 在无工具 step 结束后 L571 直断）；工具延续步空批次成立（step 85/86/104–106 实测 `incoming:0`）。抑制规则保留，覆盖仅剩的 L542/L543 罕见分支（机制已按 F10 修订）。
-3. ✅ root ctx 未打标签监听者收到其他 agent 的 scope 事件：探针在 root 捕获到子代理（不同 sessionId）的 `agent/session-start` 与 `agent/pre-step`。注：本会话 subagent 后端两次首请求失败（对照实验证明与探针无关），属环境问题，不影响契约结论。
+3. ✅ root ctx 未打标签监听者收到其他 agent 的 scope 事件：探针在 root 捕获到子代理（不同 sessionId）的 `agent/session-start` 与 `agent/pre-step`。（0.1.x 实测记录；0.2.0 起该事件为 `agent/created`，向上传播语义不变——0.4.0 启动冒烟复核。）注：本会话 subagent 后端两次首请求失败（对照实验证明与探针无关），属环境问题，不影响契约结论。
 4. ✅（负向确认）本 preset 未挂载 `run_code`，`tools/result` 只覆盖顶层调用；`tools/code-dispatch-log` 存在但无 Code Mode 可触发 → §5.2.2 的「子调用归 B 类兜底」为本 preset 下的唯一路径，设计不变。
 5. ✅ bundle patch 闭环：`dsh plugin --profile m0probe add <本地包>` 自动初始化 profile、manifest `dsh.profile.bundles` 增层、`--dump-config` 组合树出现 `# == bright-drift-m0-bundle-probe` 层横幅与 insert 行；`remove` 后行消失。insert 行语法以 `dsh-base/cordis.patch.yml` 为准（`- insert: [- id: …  name: …]`）。HMR 由 `watchUserPatches` 常驻（静态确认）。
-6. ✅ settings 命名空间：函数式 schema `settings.register('bright-drift-m0', fn)` 注册成功并解析默认值；外部编辑 `settings.yaml` 后 `settings/document-updated`（revision+1）与 `settings/updated`（`source:"provider"`，解析值正确）同步触发，实测热更新延迟 **~96ms**；Web 设置 UI 数据源 `settings.describe()` 依赖注册表（注册成功即入列）。
+6. ✅ settings 命名空间（0.1.x 实测记录，0.2.0 已废弃该服务）：函数式 schema `settings.register('bright-drift-m0', fn)` 注册成功并解析默认值；外部编辑 `settings.yaml` 后 `settings/document-updated`（revision+1）与 `settings/updated`（`source:"provider"`，解析值正确）同步触发，实测热更新延迟 **~96ms**。0.4.0 起由 D10 的 Config/volatile 通道取代，热更新语义由 `loader/volatile-update` 复核。
 
 **M0 全部勾销；门禁解除，M2 可开始。**
 
@@ -472,6 +492,7 @@ T1–T10 保留，修订与新增：
 | M1 核心引擎（第 1–2 周）✅ 2026-08-30 | `bright-drift-core` 七模块 + 单测（E1–E6、E12、E16–E18 全覆盖；bash/pwsh 静态分析用例） | 引擎单测全绿（113 用例 / 14 文件），脱离 dsh 可跑（commit `aac2c05`） |
 | M2 dsh 集成（第 3 周）✅ 2026-08-30 | adapter 绑定；FR-1~FR-4、FR-7（含 pwsh）全通；E7/E11/E14/E15/E16 端到端 | 真实 headless 会话 E2E 全通（见 §8.3）；adapter 19 用例 + core 115 用例全绿 |
 | M3 打磨与发布（第 4 周）✅ 2026-08-30（`npm publish` 动作为用户保留） | settings + 项目级覆盖、/bright-drift 命令族、日志、文档、npm 发布（bundle patch 形态）、README 演示 | 发布就绪：MIT LICENSE、双包元数据 + README、`pnpm pack` 白名单正确（adapter 含 `cordis.patch.yml`，`workspace:*` 发布时重写为 `0.1.0`）；性能门达标（reconcile 10 万条目 46ms、pre-step 决策 0.014µs/次、归因分类 0.19µs/次、AKB 快照往返 100k 188ms）；`pnpm publish -r` 需用户 npm 凭据，留作手动步骤 |
+| M3b dsh 0.2.0 适配（2026-10，**0.4.0**） | D10 全量：`agent/created` 迁移 + `agent/disposed` 幂等清理、声明式 Config（section 级 volatile）+ `loader/volatile-update` 热更新、source kind 自声明 + `createUserMessage`/`boundContextSummary`、真实类型直消费 + `src/contract.ts` 负向断言、peerDependencies、启动冒烟脚本、T1–T13 在 0.2.0 重跑 | 全量 build/typecheck/单测绿；隔离 `DSH_HOME` 冒烟断言 `plugin.applied/session.start/watcher.acquired` 且无 `*.error`；T1–T13 矩阵复核 |
 
 ### 8.3 M2 端到端实测记录（2026-08-30，headless profile `bddev`）
 
