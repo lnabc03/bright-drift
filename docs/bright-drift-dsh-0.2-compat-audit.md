@@ -563,3 +563,19 @@ Get-Content "$t\logs\bright-drift\*.log"
 | S3 | 旧冒烟用符号链接安装，**天然掩盖 S1/S2** | junction 形态 8/8 通过，`file:` 形态立刻失败 | 冒烟改为 `dsh plugin add file:<repo>` 真实形态，并新增"安装副本能独立 `import` 自身依赖"断言 |
 
 修复后在 dsh 0.2.0-rc.2 上实测：真实安装形态冒烟 8/8 通过（`plugin.applied / config.applied / session.start / watcher.acquired / 零 error / volatile 热更新无 remount / drift.detected`），单测 43 项、全仓 build+typecheck 零错。
+
+### 11.1 R2（PTC 模式）关闭：嵌套子派发仍走完整 tools/* 管线
+
+§8 的 R2 只剩静态推断，本次用 `DSH_TOOLS_MODE=ptc` 起进程、新会话实测（模型只能调 `run_code`，`read`/`edit`/`pwsh` 全部变为 run_code 内部子派发）：
+
+| 观测 | 日志证据 | 说明 |
+|---|---|---|
+| 嵌套 `read` 产生观察 | `baseline.update {path: "packages/dsh-adapter/cordis.patch.yml", source: "read", hash: "976c10a5…"}` | `tools/result` 对子派发同样触发，且携带 `agent` 与原始 `file_path` |
+| 嵌套 `pwsh` 开归因窗口 | `window.open {callId: "call_00_fJ1EuA5q7frLgfU62Jy24737:ptc:1", predicted: ["packages/dsh-adapter/cordis.patch.yml"]}` | callId 的 `:ptc:1` 后缀直接证明是 PTC 子派发；`predicted` 非空说明 `analyzeCommand` 对子派发同样拿到了**原始命令文本** |
+| 归因 B 类 | 通知正文 `COMMAND-SIDE-EFFECT  你的命令 Add-Content -LiteralPath '…cordis.patch.yml' -Value '# ptc-shell-test' …` | 与 native 模式逐字同形 |
+| agent 自写回声抑制 | `baseline.update {source: "write", prevHash: "eb61cbd8…"}`，其后通知不含该文件 | Sync Point 与回声抑制对嵌套写同样成立 |
+| 外部改动 C 类 | `EXTERNAL·MODIFIED (high confidence) … (+1 -0)` + `@@ -3,3 +3,4 @@` 行级 diff | 与 native 一致 |
+| 静态分析落空时的兜底 | `git checkout -- <path>` 的 `predicted: []`（分析器不解析该子命令的路径参数），但改动仍被归为 B 类 | 窗口本身即兜底依据，预测不是归因的必要条件 |
+| 会话健康 | 该会话 16 条事件、0 条 `*.error`；同 root 上两个会话仅 `watcher.acquired` 一次 | watcher refcount 共享在多会话下正确 |
+
+**结论**：R2 关闭——PTC 模式不需要任何额外代码路径，审计 §5-A11 的"维持单通道"决策在 PTC 下同样成立。副作用提醒：`run_code` 内的子派发 callId 形如 `<root>:ptc:<n>`，若将来新增按 callId 的持久键，必须按完整字符串（含后缀）处理，不能假定为纯 UUID。
