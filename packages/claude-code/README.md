@@ -28,7 +28,7 @@ Hooks are **merged** into `settings.json` (never overwritten) and registered in 
 - High-priority batches (a file the agent knows was deleted/renamed) are topped up once at turn end via the Stop hook.
 - Cold-start reconcile on resume: drift that happened while CC was closed is caught up.
 
-CLI only: Claude Code Desktop / Agent SDK / VS Code do not load hooks ([#87657](https://github.com/anthropics/claude-code/issues/87657)). Fail-open throughout: any internal error means "no injection", never a blocked session.
+CLI only: Claude Code Desktop / Agent SDK / VS Code sessions intermittently load zero hooks ([#87657](https://github.com/anthropics/claude-code/issues/87657)). `claude --bare` skips all settings hooks by design — bright-drift is inactive in bare mode. Fail-open throughout: any internal error means "no injection", never a blocked session.
 
 Complementary to the built-in FileStateCache (a write-time optimistic lock): it stops the agent from clobbering your edits; bright-drift tells the agent *that* the workspace changed, with diffs, before it trips over stale assumptions.
 
@@ -46,7 +46,7 @@ attribution: { bashWindowGraceMs: 1500, longCommandMs: 10000 }
 
 ## How it works
 
-- **Hooks** (short-lived node processes): SessionStart registers the session and launches the daemon (idempotent); UserPromptSubmit delivers the pre-rendered injection (one file read, <10 ms hot path); Stop tops up high-priority batches at most once; PreToolUse(Bash) takes the attribution pre-snapshot in-process; PostToolUse feeds the AKB; SessionEnd deregisters.
+- **Hooks** (short-lived node processes): SessionStart registers the session and launches the daemon (idempotent); UserPromptSubmit delivers the pre-rendered injection (one file read, <10 ms hot path); Stop tops up high-priority batches at most once; PreToolUse(Bash) takes the attribution pre-snapshot in-process; PostToolUse feeds the AKB and closes the attribution window on success, with PostToolUseFailure/PermissionDenied closing it when the command fails or is denied; SessionEnd deregisters.
 - **Daemon** (one per workspace, detached): chokidar watcher, per-session AKB + attribution windows, budget rendering; exits after 30 min without a live session.
 - **State**: `~/.claude/state/bright-drift/` — plain JSON, atomic writes, fully inspectable. All IPC is this directory; there are no sockets. Logs record hashes/paths/counts, never file contents.
 

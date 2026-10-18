@@ -136,6 +136,38 @@ describe('drift pipeline (P2-T1/T2 at engine level)', () => {
     expect(windows[0]!.command).toBe('make all');
   });
 
+  it('a window closed without the command running keeps later drift external (audit P2-1)', async () => {
+    // Denied/failed Bash: the window opens at PreToolUse and closes at the
+    // terminal event with the command never having run. Drift arriving after
+    // the close must classify as EXTERNAL, not COMMAND-SIDE-EFFECT.
+    await fs.writeFile(path.join(ws, 'a.txt'), 'v1\n');
+    await observe('a.txt', 'read');
+    await engine.handle({
+      type: 'window.open',
+      sessionId: 's1',
+      toolUseId: 'call-denied',
+      command: 'rm a.txt',
+      openedAt: Date.now(),
+      preSnapshot: [],
+      predictedPaths: ['a.txt'],
+    });
+    await engine.handle({
+      type: 'window.close',
+      sessionId: 's1',
+      toolUseId: 'call-denied',
+      closedAt: Date.now(),
+    });
+    // Wait out the grace period before the external edit lands.
+    await new Promise((r) => setTimeout(r, 1600));
+    await fs.writeFile(path.join(ws, 'a.txt'), 'v2 external\n');
+    await engine.handleWatchBatch([{ path: 'a.txt', kind: 'change' }]);
+
+    const p = await readPending();
+    expect(p?.text).toContain('EXTERNAL·MODIFIED');
+    expect(p?.text).not.toContain('COMMAND-SIDE-EFFECT');
+  });
+
+
   it('re-renders an undelivered batch to absorb later drift (smoke test 2026-09-02)', async () => {
     // Report §2.1: with the Sync Point at render time, an undelivered batch
     // froze at first render and every notification lagged one version. Now

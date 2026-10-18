@@ -76,7 +76,7 @@ docs/
 3. **渲染产物 ≤ 9,500 字符**（E4 红线）：官方承诺 10,000、实测 ~25KB spill，超线整批折叠为单行摘要。
 4. **Windows 平台坑**：杀 daemon 用 PowerShell `Stop-Process`（Git Bash `kill <pid>` 不可靠）；原子写 rename 覆盖遇瞬时 EPERM 需重试。
 5. hooks 是 esbuild 打包的 ESM 单文件，`yaml` 是 CJS dynamic require——构建须加 `createRequire` banner shim。
-6. **平台限制（phase2 §2.2 非目标，不修）**：仅 CLI；桌面端/Agent SDK/VS Code 不加载 hooks（#87657）；插件 hooks.json 的 hook 发现损坏（#16288）。上架插件市场被此二 bug 阻塞，维持 settings.json 注入形态。
+6. **平台限制（phase2 §2.2 非目标，不修）**：仅 CLI；桌面端/Agent SDK/VS Code 会话**间歇性**加载 0 个 hooks（#87657，2.1.300 复核仍 OPEN，报告者已自我修正为间歇性而非全量）；插件 hooks.json 的 hook 发现在 CLI 侧仍损坏（#16288，2.1.300 复核仍 OPEN）。上架插件市场被 #16288 阻塞，维持 settings.json 注入形态。`--bare` 模式跳过一切 settings hooks，属预期（bright-drift 在该模式下不工作）。
 7. CC 配置 schema 与 dsh 五节通用（`watch`/`budget`/`diff`/`baseline`/`attribution`），仅 `inject` 节平台特有（dsh: `onPreStep`/`onSessionStart`/`promptSection`；CC: `onUserPrompt`/`onStop`/`staticOverview`）。
 
 ## 6. 安全与隐私

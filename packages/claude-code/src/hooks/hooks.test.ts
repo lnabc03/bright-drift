@@ -136,6 +136,64 @@ describe('stop hook (at-most-once gate, §5.6.2)', () => {
   });
 });
 
+describe('tool-settled hook (PostToolUseFailure / PermissionDenied, §5.5.1)', () => {
+  async function readMailbox(sessionId: string): Promise<string[]> {
+    const dir = path.join(stateHome, 'workspaces', hash, 'mailbox', sessionId);
+    const names = await fs.readdir(dir).catch(() => [] as string[]);
+    return Promise.all(
+      names.sort().map((n) => fs.readFile(path.join(dir, n), 'utf8')),
+    );
+  }
+
+  it('closes the attribution window for a failed Bash call', async () => {
+    const res = runHookFile(hook('tool-settled.js'), {
+      session_id: 's1',
+      cwd,
+      hook_event_name: 'PostToolUseFailure',
+      tool_name: 'Bash',
+      tool_input: { command: 'false' },
+      tool_use_id: 'toolu_fail_1',
+      error: 'exit 1',
+    }, env);
+    expect(res.status).toBe(0);
+    expect(res.stdout).toBe('');
+    const msgs = await readMailbox('s1');
+    expect(msgs).toHaveLength(1);
+    const msg = JSON.parse(msgs[0]!);
+    expect(msg.type).toBe('window.close');
+    expect(msg.toolUseId).toBe('toolu_fail_1');
+  });
+
+  it('closes the window for a denied Bash call (PermissionDenied)', async () => {
+    const res = runHookFile(hook('tool-settled.js'), {
+      session_id: 's1',
+      cwd,
+      hook_event_name: 'PermissionDenied',
+      tool_name: 'Bash',
+      tool_input: { command: 'rm -rf /' },
+      tool_use_id: 'toolu_deny_1',
+      reason: 'user denied',
+    }, env);
+    expect(res.status).toBe(0);
+    const msg = JSON.parse((await readMailbox('s1'))[0]!);
+    expect(msg).toMatchObject({ type: 'window.close', toolUseId: 'toolu_deny_1' });
+  });
+
+  it('ignores non-Bash tools and missing context (fail-open)', async () => {
+    const notBash = runHookFile(hook('tool-settled.js'), {
+      session_id: 's1',
+      cwd,
+      tool_name: 'Read',
+      tool_use_id: 'toolu_read_1',
+    }, env);
+    expect(notBash.status).toBe(0);
+    expect(notBash.stdout).toBe('');
+    const noCtx = runHookFile(hook('tool-settled.js'), {}, env);
+    expect(noCtx.status).toBe(0);
+    expect(await readMailbox('s1')).toHaveLength(0);
+  });
+});
+
 describe('session-start hook selftest (installer dry-run, §5.9-3)', () => {
   it('reports ok without touching sessions or spawning a daemon', async () => {
     const res = runHookFile(

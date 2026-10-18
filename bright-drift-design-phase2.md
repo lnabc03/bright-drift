@@ -3,6 +3,7 @@
 > 状态：设计定稿，待评审 · 日期：2026-09-02
 > 上游：bright-drift-PRD.md §6（二期规划）、bright-drift-design-phase1.md（core 引擎与一期平台事实）、bright-drift-phase2-research.md（预研报告，含全部实测数据）
 > 验证环境：Claude Code 2.1.258 / Windows 11；官方文档 code.claude.com/docs/en/hooks（2026-09-02 defuddle 全文复核）
+> 复核：CC **2.1.300**（2026-10-18，见 docs/bright-drift-cc-2.1-compat-audit.md）——六事件契约全部通过；唯一落地修改为归因窗口的失败/拒批关闭路径（§5.5.1、§5.9）
 
 ---
 
@@ -21,7 +22,7 @@ PRD §6.2 的「短命 hook 桥 + 独立 watcher daemon」架构**实测成立**
 | # | PRD 假设 | 核实结论 | 处理 |
 |---|---|---|---|
 | E1 | §6.1 注入通道：UserPromptSubmit，粒度降级为用户发言轮 | 确认。另有增量：v2.1.163+ **Stop hook 支持 additionalContext 且对话继续** | 采纳为第二注入通道（P2-D6），需 at-most-once 门控（§5.6） |
-| E2 | §6.2-4 桌面端/Agent SDK 不加载 hooks | 确认，且 VS Code 扩展同病（#87657/#18547，OPEN） | 二期只承诺 CLI；README 明示（§2.2） |
+| E2 | §6.2-4 桌面端/Agent SDK 不加载 hooks | 确认，且 VS Code 扩展同病（#87657/#18547，OPEN；2.1.300 复核：报告者自我修正为**间歇性** 0 hooks，issue 仍未关） | 二期只承诺 CLI；README 明示（§2.2） |
 | E3 | §6.2-4 插件分发的 hooks 信任提示影响体验 | 信任为插件级一次性确认，体验无碍；但发现更大的坑：**#16288（插件 hooks.json 中 UserPromptSubmit/FileChanged 不触发）OPEN 未修** | 安装主路径改为 settings.json 注入（P2-D9），插件 marketplace 形态推迟 |
 | E4 | （PRD 未涉及）additionalContext 尺寸上限 | 官方文档承诺 10,000 字符，超出 spill 成文件只剩预览；实测 2.1.258 上阈值 ≈25,000 字节（文档滞后于实现） | **硬约束：渲染产物 ≤ 9,500 字符**（按文档承诺取值，实测余量当安全垫），超线走降级梯（§5.7） |
 | E5 | §6.2-2 daemon 拉起 | 可行；但 SessionStart 在 `startup/resume/clear/compact/fork` 五种 source 均触发（resume 实测确认） | daemon 拉起与注册必须幂等（§5.2） |
@@ -40,7 +41,7 @@ PRD §6.2 的「短命 hook 桥 + 独立 watcher daemon」架构**实测成立**
 | SessionStart matcher | 可按 source 过滤：`startup\|resume\|clear\|compact\|fork` | hooks 参考文档 matcher 表 |
 | hook 执行形态 | `async:true` 后台不阻塞；exec form（`command`+`args`）不经 shell；`shell` 字段可指定 bash/powershell（Windows 无 Git Bash 时默认 powershell） | hooks 参考文档 common fields |
 | Stop 循环保护 | `stop_hook_active` 为 true 表示本轮已是 stop-hook 续跑；**官方 8 连阻断后强制收停** | hooks 参考文档 §Stop input；spike #2 实测 ~9 次重拉 |
-| PostToolUse 载荷 | `tool_input.file_path`（spike 实测为绝对路径；官方注明可能相对，需结合 `cwd` 归一化） | spike #1；hooks 参考文档 |
+| PostToolUse 载荷 | `tool_input.file_path`（spike 实测为绝对路径；2.1.300 文档已明确 file-tool 路径**恒为绝对路径**、平台原生分隔符；`cwd` 归一化保留作未知工具的兜底） | spike #1；hooks 参考文档 |
 | resume 重放 | 历史 UserPromptSubmit 注入从 transcript 重放，不重跑 hook | hooks 参考文档（E7） |
 
 ---
@@ -56,7 +57,7 @@ PRD §6.2 的「短命 hook 桥 + 独立 watcher daemon」架构**实测成立**
 
 ### 2.2 非目标
 
-- **桌面端 / Agent SDK / VS Code 扩展形态**（hooks 不加载，#87657 未修；文档明示 CLI-only）。
+- **桌面端 / Agent SDK / VS Code 扩展形态**（hooks 间歇性不加载，#87657 未修；文档明示 CLI-only）。
 - **插件 marketplace 上架**（#16288 未修前插件 hooks.json 路径不可靠；M6 重估，届时若已修复则补充分发形态）。
 - **turn 内逐 step 注入**（平台硬限制，无通道；Stop 通道只覆盖 turn 结束边界）。
 - **进程级精确归因**（fanotify/eBPF，PRD §7.1 backlog，v2+ 再议）。
@@ -98,6 +99,8 @@ packages/claude-code/                # npm: bright-drift-claude-code
                 │   读 pending/<sid>.json → 打印 → exit 0      │
   Read/Edit ──► │ PostToolUse hook → 写 mailbox/ 文件           │
   Bash 前 ────► │ PreToolUse hook → 就地 stat 快照 → 写 mailbox/ │
+  Bash 失败/被拒 ► PostToolUseFailure/PermissionDenied hook      │
+                │   → window.close 邮箱（§5.5.1，2.1.300 复核补） │
   turn 结束 ──► │ Stop hook → 读 pending（stop 批次）→ 投递一次  │
   会话始/终 ──► │ SessionStart/End hook → 注册/注销 mailbox      │
                 └──────────────┬───────────────────────────────┘
@@ -164,7 +167,7 @@ packages/claude-code/                # npm: bright-drift-claude-code
 | `session.deregister` | { sessionId, reason } | SessionEnd |
 | `akb.observe` | { toolUseId, tool, filePath, action:"read"\|"write" } | PostToolUse(Read\|Edit\|Write\|MultiEdit) |
 | `window.open` | { toolUseId, command, shell, background, openedAt, preSnapshot, predictedPaths } | PreToolUse(Bash)（预快照 hook 就地完成，§5.5.2） |
-| `window.close` | { toolUseId, closedAt } | PostToolUse(Bash) |
+| `window.close` | { toolUseId, closedAt } | PostToolUse(Bash)；命令失败走 PostToolUseFailure(Bash)、权限被拒走 PermissionDenied(Bash)（2.1.300 复核补订，三者互斥，同一 tool_use 只有一个终态事件） |
 | `session.ping` | { sessionId } | 任意 hook 的存活刷新（并入 lastSeen 亦可，M4 实测定夺） |
 
 **乱序与丢失**：邮箱是「至少一次、可能乱序」通道。`window.close` 先于 `window.open` 到达时按 open 处理并立即关闭（以消息内时间戳为准重排，Attributor 的窗口状态机对此天然宽容——窗口只是时间区间 + 快照）。AKB observe 丢失的后果保守（文件状态偏旧 → 偏向报为外部变更），符合诚实归因原则。
@@ -248,9 +251,13 @@ PreToolUse(Bash) hook                daemon
   3. analyzeCommand 静态分析   │（复用 core，hook 内联 bundle）
   4. 写 window.open 邮箱 ────►  5. Attributor 开窗（as-of openedAt）
                                   6. watcher 漂移进入窗口覆盖期 → B/ambiguous
-PostToolUse(Bash) hook
+PostToolUse(Bash) hook          ┐
+  · 或 PostToolUseFailure(Bash)  │ 同一 tool_use 的互斥终态
+  · 或 PermissionDenied(Bash)   ┘
   7. 写 window.close ────────►  8. 关窗，effectiveUntil = closedAt + grace
 ```
+
+> **窗口必须有终态事件兜底**（2.1.300 复核发现）：官方文档明确 PostToolUse 只在工具**成功**后触发（"fire after a tool has already executed successfully"），失败走 PostToolUseFailure、权限被拒走 PermissionDenied；而 Attributor 的窗口**没有超时**（前台窗口关窗前 effectiveUntil 也是 MAX_SAFE_INTEGER，见 attributor.ts）。缺少失败/拒批的关窗路径会让一条从未执行的命令永久敞窗，把之后的外部漂移错归为 B 类——与 PRD §3.6 的不对称偏向方向相反。PostToolUseFailure/PermissionDenied 与 PostToolUse 对同一 tool_use_id 互斥，closeWindow 对未知 id 幂等，因此三条路径共用同一个 `tool-settled` 语义是安全的。
 
 #### 5.5.2 预快照就地进行（E6 决策，P2-D5）
 
@@ -324,7 +331,7 @@ npx bright-drift-claude-code install [--project]   # 默认装用户级 ~/.claud
 npx bright-drift-claude-code uninstall
 ```
 
-1. 读取目标 settings.json → 合并 `hooks` 节的 6 个条目（SessionStart/UserPromptSubmit/PostToolUse×1/PreToolUse/Stop/SessionEnd），exec form 指向 `node_modules/bright-drift-claude-code/lib/hooks/*.js` 绝对路径。**合并而非覆盖**：已有其他 hook 条目原样保留，按 `command` 字符串识别自家条目做幂等更新。
+1. 读取目标 settings.json → 合并 `hooks` 节的 8 个条目（SessionStart/UserPromptSubmit/PostToolUse/PostToolUseFailure/PermissionDenied/PreToolUse/Stop/SessionEnd），exec form 指向 `node_modules/bright-drift-claude-code/lib/hooks/*.js` 绝对路径。**合并而非覆盖**：已有其他 hook 条目原样保留，按 `command` 字符串识别自家条目做幂等更新。
 2. 写 `install.json` 版本戳 `{ version, installedAt, hooksPath, settingsTarget }`；每次 install 重跑即升级（换路径 + 刷版本戳）。
 3. 自检：install 末尾 dry-run 一次 session-start hook（直接 spawn 执行），确认 node 可用、路径可达、daemon 能拉起；失败打印修复指引。
 4. 卸载：摘除自家 hook 条目、停 daemon（读 lock pid 后 SIGTERM）、保留状态目录（`--purge` 才删）。

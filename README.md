@@ -104,7 +104,7 @@ npx bright-drift-claude-code install --project  # 仅当前仓库 .claude/settin
 npx bright-drift-claude-code uninstall          # 卸载（状态保留，--purge 才删除）
 ```
 
-安装器把 hooks **合并**进 settings.json（绝不覆盖已有条目），并写入五个斜杠命令：`/bright-drift:status|diff|pause|resume|nodiff`。**仅支持 CLI 形态**——Claude Code 桌面端 / Agent SDK / VS Code 扩展不加载 hooks（[#87657](https://github.com/anthropics/claude-code/issues/87657)）、插件 hooks.json 的 hook 发现机制整体损坏（[#16288](https://github.com/anthropics/claude-code/issues/16288)）。
+安装器把 hooks **合并**进 settings.json（绝不覆盖已有条目），并写入五个斜杠命令：`/bright-drift:status|diff|pause|resume|nodiff`。**仅支持 CLI 形态**——Claude Code 桌面端 / Agent SDK / VS Code 会话间歇性加载不到 hooks（[#87657](https://github.com/anthropics/claude-code/issues/87657)）、插件 hooks.json 的 hook 发现机制整体损坏（[#16288](https://github.com/anthropics/claude-code/issues/16288)）；`--bare` 模式按设计跳过全部 settings hooks，bright-drift 在该模式下不工作。
 
 与 CC 内置能力的关系：
 
