@@ -21,6 +21,8 @@ packages/
 bright-drift-PRD.md               # 产品定义（中文）
 bright-drift-design-phase1.md     # 一期技术设计（中文，单一事实源）
 bright-drift-design-phase2.md     # 二期技术设计（中文）
+docs/
+  bright-drift-dsh-0.2-compat-audit.md   # 历史核查报告：dsh 0.2.0 兼容性排查（2026-10，结论已并入 phase1 D10）
 ```
 
 **架构红线（不可违反，违者返工）：**

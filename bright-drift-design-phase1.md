@@ -460,6 +460,8 @@ T1–T10 保留，修订与新增：
 
 ### 7.1 0.4.0 增补：防回归两层防线（D10，2026-10）
 
+> 完整排查证据与实测日志见 [`docs/bright-drift-dsh-0.2-compat-audit.md`](docs/bright-drift-dsh-0.2-compat-audit.md)。
+
 0.1.x → 0.2.0 的全部破坏（事件删除、服务方法移除、payload 变形、source 词汇表变化）之所以能穿过 32 个 mock 单测，是因为旧套件只断言"我方实现的契约"。0.4.0 起新增三层：
 
 1. **类型契约（编译期）**：adapter 生产代码直接消费 dsh 真实 `.d.ts`（弃用手写 shim）；`src/contract.ts` 正向钉住全部宿主接触面（事件名/payload/返回类型/服务形状），并用 `@ts-expect-error` 负向锁定 0.2.0 已删除的 `agent/session-start` 与 `settings.register`——宿主若改名或复活旧 API，tsc 立即失败。
