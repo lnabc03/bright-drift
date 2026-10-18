@@ -72,8 +72,14 @@ beforeEach(async () => {
 afterEach(async () => {
   if (prevHome === undefined) delete process.env.DSH_HOME;
   else process.env.DSH_HOME = prevHome;
-  await fs.rm(home, { recursive: true, force: true });
-  await fs.rm(ws, { recursive: true, force: true });
+  // The plugin's teardown (watcher stop + AKB flush) and disposeState writes
+  // are fire-and-forget, so a busy temp dir is expected for a moment; retry
+  // rather than failing the assertion that already ran.
+  const rm = (target: string) =>
+    fs.rm(target, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  await new Promise((r) => setTimeout(r, 150));
+  await rm(home);
+  await rm(ws);
 });
 
 async function readEvents(): Promise<string[]> {
