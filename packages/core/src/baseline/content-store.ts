@@ -68,8 +68,8 @@ export class ContentStore {
         }
       }
     } catch (error) {
-      // Missing dir on first run is normal.
-      this.onError?.(error, 'index-scan');
+      // Missing dir on first run is normal — not an error worth logging.
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') this.onError?.(error, 'index-scan');
     }
     return this.index;
   }
