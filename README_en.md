@@ -105,7 +105,7 @@ npx bright-drift-claude-code install --project  # this repo's .claude/settings.j
 npx bright-drift-claude-code uninstall          # remove (state kept; --purge deletes)
 ```
 
-The installer **merges** hooks into settings.json (never overwrites existing entries) and installs five slash commands: `/bright-drift:status|diff|pause|resume|nodiff`. **CLI only** — Claude Code Desktop / Agent SDK / VS Code do not load hooks ([#87657](https://github.com/anthropics/claude-code/issues/87657)), and plugin hook discovery via `hooks.json` is broken ([#16288](https://github.com/anthropics/claude-code/issues/16288)).
+The installer **merges** hooks into settings.json (never overwrites existing entries) and installs five slash commands: `/bright-drift:status|diff|pause|resume|nodiff`. **CLI only** — Claude Code Desktop / Agent SDK / VS Code sessions intermittently load zero hooks ([#87657](https://github.com/anthropics/claude-code/issues/87657)), and plugin hook discovery via `hooks.json` is broken ([#16288](https://github.com/anthropics/claude-code/issues/16288)). `claude --bare` skips all settings hooks by design, so bright-drift is inactive in bare mode.
 
 Complementary to built-in CC defenses:
 

@@ -12,6 +12,7 @@ const hookEntries = [
   'user-prompt-submit',
   'post-tool-use',
   'pre-tool-use-bash',
+  'tool-settled',
   'stop',
   'session-end',
 ];

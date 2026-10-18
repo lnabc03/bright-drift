@@ -28,12 +28,13 @@ export interface HookEntry {
 /** Marker identifying a hook command as ours (path inside this package). */
 const OWN_MARKER = `bright-drift-claude-code/lib/hooks/`;
 
-/** Our six bundled filenames — distinctive enough to recognize under any lib/hooks/. */
+/** Our seven bundled filenames — distinctive enough to recognize under any lib/hooks/. */
 const OWN_FILES = new Set([
   'session-start.js',
   'user-prompt-submit.js',
   'post-tool-use.js',
   'pre-tool-use-bash.js',
+  'tool-settled.js',
   'stop.js',
   'session-end.js',
 ]);
@@ -46,7 +47,7 @@ export function hooksDir(): string {
   return path.join(here, 'hooks');
 }
 
-/** The six hook entries (§5.9-1), exec form: no shell anywhere (B9). */
+/** The eight hook entries (§5.9-1), exec form: no shell anywhere (B9). */
 export function buildHookEntries(dir: string): Record<string, HookEntry[]> {
   const cmd = (file: string, extra?: Partial<HookCommand>): HookCommand => ({
     type: 'command',
@@ -63,6 +64,10 @@ export function buildHookEntries(dir: string): Record<string, HookEntry[]> {
         hooks: [cmd('post-tool-use.js')],
       },
     ],
+    // A Bash call that fails or is denied never reaches PostToolUse — these
+    // two events close the attribution window instead (design §5.5.1).
+    PostToolUseFailure: [{ matcher: 'Bash', hooks: [cmd('tool-settled.js')] }],
+    PermissionDenied: [{ matcher: 'Bash', hooks: [cmd('tool-settled.js')] }],
     PreToolUse: [{ matcher: 'Bash', hooks: [cmd('pre-tool-use-bash.js')] }],
     Stop: [{ hooks: [cmd('stop.js')] }],
     SessionEnd: [{ hooks: [cmd('session-end.js')] }],

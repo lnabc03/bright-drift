@@ -96,13 +96,22 @@ describe('mergeHooks / removeOwnHooks', () => {
 });
 
 describe('install / uninstall (P2-T12)', () => {
-  it('install creates settings with all six events, exec form, async SessionStart', async () => {
+  it('install creates settings with all eight events, exec form, async SessionStart', async () => {
     await install({ settingsPath });
     const s = await readSettings() as unknown as {
       hooks: Record<string, Array<{ matcher?: string; hooks: Array<{ command: string; args: string[]; async?: boolean }> }>>;
     };
     expect(Object.keys(s.hooks).sort()).toEqual(
-      ['PostToolUse', 'PreToolUse', 'SessionEnd', 'SessionStart', 'Stop', 'UserPromptSubmit'].sort(),
+      [
+        'PermissionDenied',
+        'PostToolUse',
+        'PostToolUseFailure',
+        'PreToolUse',
+        'SessionEnd',
+        'SessionStart',
+        'Stop',
+        'UserPromptSubmit',
+      ].sort(),
     );
     const start = s.hooks.SessionStart?.[0]?.hooks[0];
     expect(start?.command).toBe('node');
@@ -110,6 +119,11 @@ describe('install / uninstall (P2-T12)', () => {
     expect(start?.args[0]).toContain('bright-drift-claude-code');
     expect(s.hooks.PostToolUse?.[0]?.matcher).toContain('Bash');
     expect(s.hooks.PreToolUse?.[0]?.matcher).toBe('Bash');
+    // The window-closing pair shares one bundle (design §5.5.1).
+    expect(s.hooks.PostToolUseFailure?.[0]?.matcher).toBe('Bash');
+    expect(s.hooks.PermissionDenied?.[0]?.matcher).toBe('Bash');
+    expect(s.hooks.PostToolUseFailure?.[0]?.hooks[0]?.args[0]).toContain('tool-settled.js');
+    expect(s.hooks.PermissionDenied?.[0]?.hooks[0]?.args[0]).toContain('tool-settled.js');
 
     const stamp = JSON.parse(
       await fs.readFile(path.join(dir, 'state', 'install.json'), 'utf8'),

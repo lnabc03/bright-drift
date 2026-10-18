@@ -42,7 +42,8 @@ async function main(input: Record<string, unknown>): Promise<void> {
         ? toolInput.notebook_path
         : undefined;
   if (!rawPath) return;
-  // The docs warn file_path may be relative; anchor it at the payload cwd.
+  // File-tool paths are documented as always absolute (2.1.300 hooks
+  // reference); the relative fallback is a guard for unknown tools only.
   const filePath = path.isAbsolute(rawPath) ? rawPath : path.resolve(ctx.cwd, rawPath);
 
   if (READ_TOOLS.has(tool)) {
