@@ -56,29 +56,31 @@ pnpm -r build
 
 ```yaml
 overrides:
-  bright-drift-core: link:C:/absolute/path/to/bright-drift/packages/core
+  bright-drift-core: file:C:/absolute/path/to/bright-drift/packages/core
 ```
 
-使用绝对路径，斜杠用正斜杠。
+使用绝对路径，斜杠用正斜杠。**必须用 `file:` 而不是 `link:`**：插件是安装进 profile 的独立单元，运行时只能从 profile 的 `node_modules` 解析依赖；`link:` 不会把 core 落地到 profile 里（表现为启动时 `bright-drift: failed to import`）。
 
 3. **从仓库根目录**安装进 profile（相对路径 spec 以你的调用目录为锚）：
 
 ```bash
-dsh plugin --profile web add link:./packages/dsh-adapter
+dsh plugin --profile web add file:./packages/dsh-adapter
 ```
 
-这会把 adapter 软链到 `~/.dsh/profiles/web/node_modules/`，并且——因为 adapter 的 `package.json` 声明了 `dsh.bundle.patch`——会自动把 `bright-drift` 追加到 `dsh.profile.bundles`。无需手动改 `cordis.yml` 或 `cordis.patch.yml`。
+这会把 adapter 按发布形态（`lib/` + `cordis.patch.yml`）拷进 `~/.dsh/profiles/web/node_modules/`，并且——因为 adapter 的 `package.json` 声明了 `dsh.bundle.patch`——会自动把 `bright-drift` 追加到 `dsh.profile.bundles`。无需手动改 `cordis.yml` 或 `cordis.patch.yml`。
 
 4. 重启 profile，然后验证：
 
 ```
 ~/.dsh/logs/bright-drift/<date>.log   →   {"event":"plugin.applied", ...}
+                                     →   {"event":"config.applied", ...}
+                                     →   {"event":"session.start", ...}
 ```
 
 说明 / 排障：
 
-- `link:` 会跟随 live checkout：改完代码后运行 `pnpm -r build` 并重启 profile。移动或删除 checkout 会弄坏 profile——若打算删，请先卸载。
-- Windows：pnpm 会为 `link:` 依赖创建符号链接；若遇到 `EPERM`，请开启开发者模式或从管理员 shell 运行。
+- `file:` 是**快照式**安装（与从 npm 安装等价）：改完代码后要 `pnpm -r build` **并重新执行第 3 步**，再重启 profile。若只想边改边跑，可临时用 `link:./packages/dsh-adapter` 换速度——但那样依赖是从 checkout 自身的 `node_modules` 解析的，**不能用来验证安装是否成功**。
+- Windows：`link:` 形态需要符号链接权限，`EPERM` 时开启开发者模式或从管理员 shell 运行（`file:` 无此问题）。
 - 卸载：`dsh plugin --profile web remove bright-drift`（bundles 条目会自动移除）。
 - 若 pnpm 仍对 `workspace:*` 报错，说明第 2 步的 override 缺失、放错了位置（应放在 **profile 的** `pnpm-workspace.yaml`，不是仓库的），或不是绝对路径。
 

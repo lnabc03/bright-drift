@@ -9,7 +9,15 @@ import { StateRegistry, type AgentState } from './state.js';
 import { ConfigResolver, DEFAULT_CONFIG } from './config.js';
 import { Logger } from './log.js';
 import { fakeAgent } from './testkit.js';
-import { CONTEXT_SUMMARY_MAX_CHARS } from '@deepseek-ai/dsh-llm';
+import {
+  CONTEXT_SUMMARY_MAX_CHARS as HOST_SUMMARY_BOUND,
+  boundContextSummary as hostBoundSummary,
+} from '@deepseek-ai/dsh-llm';
+import {
+  CONTEXT_SUMMARY_MAX_CHARS as LOCAL_SUMMARY_BOUND,
+  boundContextSummary as localBoundSummary,
+  createNoticeMessage,
+} from './inject.js';
 
 let ws: string;
 let storeDir: string;
@@ -52,6 +60,28 @@ async function establishBaseline(rel: string): Promise<void> {
   });
 }
 
+describe('notice message builder (0.4.0 install-safe inline copy)', () => {
+  it('tracks the host summary bound and ellipsizes identically', () => {
+    // Our module deliberately mirrors dsh-llm instead of importing it at
+    // runtime (a profile-installed plugin cannot resolve @deepseek-ai/*).
+    expect(LOCAL_SUMMARY_BOUND).toBe(HOST_SUMMARY_BOUND);
+    const long = 'x'.repeat(HOST_SUMMARY_BOUND + 40);
+    expect(localBoundSummary(long)).toBe(hostBoundSummary(long));
+    expect(localBoundSummary(long)).toHaveLength(HOST_SUMMARY_BOUND);
+    expect(localBoundSummary('short')).toBe('short');
+  });
+
+  it('produces a frozen, producer-attributed user message', () => {
+    const message = createNoticeMessage('body', 'summary');
+    expect(message.role).toBe('user');
+    expect(message.content).toEqual([{ type: 'text', text: 'body' }]);
+    expect(message.source).toEqual({ kind: 'bright-drift', form: 'notice', summary: 'summary' });
+    expect(Object.isFrozen(message)).toBe(true);
+    expect(Object.isFrozen(message.source)).toBe(true);
+    expect(message.id).toMatch(/^[0-9a-f-]{36}$/);
+  });
+});
+
 describe('buildInjection end-to-end (FR-2/FR-3/FR-4 core loop)', () => {
   it('E2: external modification renders a line-level diff and syncs the baseline', async () => {
     await fs.writeFile(path.join(ws, 'a.ts'), 'const TTL = 3600;\n');
@@ -70,7 +100,7 @@ describe('buildInjection end-to-end (FR-2/FR-3/FR-4 core loop)', () => {
     expect(message!.source).toMatchObject({ kind: 'bright-drift', form: 'notice' });
     expect(message!.id).toBeTruthy();
     const summary = (message!.source as { summary: string }).summary;
-    expect(summary.length).toBeLessThanOrEqual(CONTEXT_SUMMARY_MAX_CHARS);
+    expect(summary.length).toBeLessThanOrEqual(HOST_SUMMARY_BOUND);
     const text = message!.content[0]!.text;
     expect(text).toContain('EXTERNAL·MODIFIED (high confidence)  a.ts');
     expect(text).toContain('-const TTL = 3600;');

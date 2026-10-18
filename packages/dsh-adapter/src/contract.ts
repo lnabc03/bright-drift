@@ -22,9 +22,11 @@ import {
   CONTEXT_SUMMARY_MAX_CHARS,
   boundContextSummary,
   createUserMessage,
+  type UserMessage,
 } from '@deepseek-ai/dsh-llm';
 import './types.js'; // MessageSourceMap: 'bright-drift' kind
 import { Config, snapshotConfig, type PluginConfig } from './config.js';
+import { CONTEXT_SUMMARY_MAX_CHARS as LOCAL_SUMMARY_BOUND, createNoticeMessage } from './inject.js';
 import { apply, name } from './index.js';
 
 /** Positive contract: the exact host surfaces apply() relies on. */
@@ -109,6 +111,16 @@ export function _typeContract(ctx: Context, config: PluginConfig): void {
   void message.id;
   void message.role;
   void CONTEXT_SUMMARY_MAX_CHARS;
+
+  // Our inlined builder must stay substitutable for the host helper: the
+  // hand-rolled message is accepted where a UserMessage is expected, and the
+  // local summary bound tracks the host constant.
+  const local: UserMessage = createNoticeMessage('drift', 'x');
+  const upstream: UserMessage = message;
+  void local;
+  void upstream;
+  const boundDrift: number = LOCAL_SUMMARY_BOUND - CONTEXT_SUMMARY_MAX_CHARS;
+  void boundDrift;
 }
 
 /**

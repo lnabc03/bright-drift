@@ -549,3 +549,17 @@ Get-Content "$t\logs\bright-drift\*.log"
 ```
 
 > 注：第 6 步只改 `%TEMP%\dsh-compat-home\profiles\bdcompat\node_modules\bright-drift\lib\index.js` 的**临时副本**，未改动仓库与已发布包。
+
+---
+
+## 11. 落地补充（2026-10，0.4.0 实施时实测发现）
+
+本节记录**本报告未预见、实施 0.4.0 时由"真实安装形态"冒烟暴露**的问题，结论已并入 phase1 决策 **D11**：
+
+| # | 问题 | 证据 | 结论 |
+|---|---|---|---|
+| S1 | 插件被 `dsh plugin add file:` 拷进 profile 后，**运行期 `import '@deepseek-ai/*'` 无法解析**——profile 的 `node_modules` 里只有插件自身与其普通依赖，宿主的 `@deepseek-ai/*` 在 dsh 安装树内，`HostResolvedRootInclude` 只解析 entry 名、不注入插件的解析路径 | `ERR_MODULE_NOT_FOUND Cannot find package '@deepseek-ai/schemastery' imported from .../node_modules/bright-drift/lib/config.js`；启动报文 `bright-drift (bright-drift): failed to import` | 运行期**零 dsh import**：注入消息改为本地 `createNoticeMessage()`（与 `createUserMessage`/`boundContextSummary` 逐字等价，单测对拍）；`@deepseek-ai/schemastery` 是唯一例外，改为 **`dependencies`** 以便装进 profile（其链为叶子库；volatile 跨副本安全：`Symbol.for('cosmokit.volatile.write')` + `~standard.vendor` 字符串判定） |
+| S2 | 本地源码安装时 profile 的 override 必须用 `file:`；`link:` **不会**把 `bright-drift-core` 落地到 profile（`pnpm list` 显示已解析，实际无该目录），症状同样是 `failed to import` | 同上，错误里先报 `bright-drift-core`，换 `file:` override 后该错误消失、改为报 S1 的包 | README 双语与 AGENTS §4 的安装命令改为 `dsh plugin add file:…` + `overrides: bright-drift-core: file:<abs>`；`link:` 仅保留为临时迭代手段并标注"不能用于验证安装" |
+| S3 | 旧冒烟用符号链接安装，**天然掩盖 S1/S2** | junction 形态 8/8 通过，`file:` 形态立刻失败 | 冒烟改为 `dsh plugin add file:<repo>` 真实形态，并新增"安装副本能独立 `import` 自身依赖"断言 |
+
+修复后在 dsh 0.2.0-rc.2 上实测：真实安装形态冒烟 8/8 通过（`plugin.applied / config.applied / session.start / watcher.acquired / 零 error / volatile 热更新无 remount / drift.detected`），单测 43 项、全仓 build+typecheck 零错。

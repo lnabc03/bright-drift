@@ -55,6 +55,9 @@ importers:
 
   packages/dsh-adapter:
     dependencies:
+      '@deepseek-ai/schemastery':
+        specifier: ^3.18.1
+        version: 3.18.4
       bright-drift-core:
         specifier: workspace:*
         version: link:../core
@@ -98,9 +101,6 @@ importers:
       '@deepseek-ai/dsh-tools':
         specifier: 0.2.0-rc.2
         version: 0.2.0-rc.2(c6e351a6a6cfd1c2a664558bffcd410d)
-      '@deepseek-ai/schemastery':
-        specifier: 3.18.4
-        version: 3.18.4
       '@types/node':
         specifier: ^22.0.0
         version: 22.20.1

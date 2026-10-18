@@ -20,7 +20,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const keep = process.argv.includes('--keep');
 const pkgDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -117,15 +117,47 @@ async function main() {
     }
     const profileDir = path.join(home, 'profiles', PROFILE);
 
-    // 3) Link the local build into the profile and register the bundle.
-    await fs.mkdir(path.join(profileDir, 'node_modules'), { recursive: true });
-    await fs.symlink(pkgDir, path.join(profileDir, 'node_modules', 'bright-drift'), 'junction');
-    const pkgJsonPath = path.join(profileDir, 'package.json');
-    const pkgJson = JSON.parse(await fs.readFile(pkgJsonPath, 'utf8'));
-    pkgJson.dsh ??= {};
-    pkgJson.dsh.profile ??= {};
-    pkgJson.dsh.profile.bundles = [...(pkgJson.dsh.profile.bundles ?? []), 'bright-drift'];
-    await fs.writeFile(pkgJsonPath, JSON.stringify(pkgJson, null, 2), 'utf8');
+    // 3) Install EXACTLY the way a user does: `dsh plugin add file:<repo pkg>`.
+    //    A junction/link install would mask the failure mode this layer exists
+    //    to catch — a plugin that loads only because the checkout's own
+    //    node_modules happen to sit beside it. `file:` copies the packed
+    //    artifact (lib + cordis.patch.yml) and resolves its runtime imports
+    //    from the profile alone, which is the real contract.
+    //    `bright-drift-core` is a workspace:* dep in the checkout, so the
+    //    profile needs the same override users apply in their dev install.
+    const workspaceFile = path.join(profileDir, 'pnpm-workspace.yaml');
+    const workspaceText = await fs.readFile(workspaceFile, 'utf8').catch(() => 'packages:\n  - .\n');
+    const coreDir = path.resolve(pkgDir, '..', 'core').replaceAll('\\', '/');
+    await fs.writeFile(
+      workspaceFile,
+      `${workspaceText.trimEnd()}\n\noverrides:\n  bright-drift-core: file:${coreDir}\n`,
+      'utf8',
+    );
+    const installed = spawnSync(dshBin, ['plugin', '--profile', PROFILE, 'add', `file:${pkgDir}`], {
+      env,
+      encoding: 'utf8',
+      shell: process.platform === 'win32',
+    });
+    if (installed.status !== 0) {
+      throw new Error(`plugin install failed:\n${installed.stdout}\n${installed.stderr}`);
+    }
+    // Prove the copied plugin resolves its own imports from the profile (no
+    // ambient repo node_modules): this is what a broken runtime dep looks like.
+    const installedEntry = path.join(profileDir, 'node_modules', 'bright-drift', 'lib', 'index.js');
+    await fs.access(installedEntry).catch(() => {
+      throw new Error('plugin install did not materialize node_modules/bright-drift/lib/index.js');
+    });
+    const importProbe = spawnSync(
+      process.execPath,
+      ['--input-type=module', '-e', `import(${JSON.stringify(pathToFileURL(installedEntry).href)}).then(m => console.log(Object.keys(m).join(','))).catch(e => { console.error(e.code, e.message); process.exit(1); })`],
+      { encoding: 'utf8' },
+    );
+    if (importProbe.status !== 0) {
+      throw new Error(`installed plugin cannot import its own runtime deps:\n${importProbe.stderr}`);
+    }
+    if (!importProbe.stdout.includes('apply')) {
+      throw new Error(`installed plugin exports an unexpected shape: ${importProbe.stdout}`);
+    }
 
     // 4) Declarative agent: session lifecycle fires with no model request.
     //    A fresh profile's cordis.patch.yml is a comment header plus a bare

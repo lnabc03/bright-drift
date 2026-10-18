@@ -66,8 +66,8 @@ docs/
 3. **永不修改 dsh 随附安装**（`config/agent-presets/` 下的 shipped preset、host composition）。需要改动 preset 行为时拷贝后改副本。
 4. 事件契约要点：会话初始化挂 `agent/created`（0.2.0 起；serial 事件，listener 必须同步、不抛、显式 `return undefined`，重活 fire-and-forget）；清理挂 `agent/disposed` + `session/disposed`（payload 是 `Session` 对象，两者幂等）；pre-step 先 `next()` 后追加；空批次 + 无工具执行 = 疑似 turn 关闭检查，**不注入**（§5.5.3）；`fs/observed` 监听器必须同步、不得 throw。配置热更新走 `loader/volatile-update`；Config 的 volatile 标在 section/叶子，**禁止标根对象**（会使默认值不填充）。
 5. 工具名集合：读 `read`/`read_image`，写 `write`/`edit`，shell 是 `bash`（POSIX）或 `pwsh`（Windows）——归因逻辑必须按平台取正确的 shell 工具名。
-6. 注入消息用 `createUserMessage()` 构造，source 固定为 `{kind:'bright-drift', form:'notice', summary}`（0.2.0 起 `MessageSourceMap` 模块增强自声明生产者 kind，无共享 `plugin` 兜底），summary 经 `boundContextSummary()` 截至 ≤120 字符。
-7. 依赖版本与 dsh 依赖树对齐：chokidar ^4.0.3、diff ^9.0.0（以安装树实际版本为准，升级前先核对）。
+6. 注入消息用本地 `createNoticeMessage()` 构造（等价于 `createUserMessage` + `boundContextSummary`：`randomUUID` + 深冻结 + 120 字符截断），source 固定为 `{kind:'bright-drift', form:'notice', summary}`（0.2.0 起 `MessageSourceMap` 模块增强自声明生产者 kind，无共享 `plugin` 兜底）。**运行期不得 import `@deepseek-ai/dsh-*`**——profile 安装的插件只能从 profile 的 `node_modules` 解析依赖；唯一例外是 `@deepseek-ai/schemastery`（Config schema），它必须以 `dependencies` 声明（决策 D11）。
+7. 依赖版本与 dsh 依赖树对齐：chokidar ^4.0.3、diff ^9.0.0、schemastery ^3.18.1（以安装树实际版本为准，升级前先核对）。本地源码安装用 `dsh plugin add file:./packages/dsh-adapter` + profile override `bright-drift-core: file:<abs>/packages/core`（`link:` 形态不落地依赖，只能用于临时迭代）。
 
 ## 5. Claude Code 平台注意事项（二期 adapter）
 

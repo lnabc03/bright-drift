@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   createFileDiff,
   createPatternMatcher,
@@ -12,7 +13,7 @@ import {
   type RenderEntry,
 } from 'bright-drift-core';
 import type { ContentStore } from 'bright-drift-core';
-import { boundContextSummary, createUserMessage, type UserMessage } from '@deepseek-ai/dsh-llm';
+import type { UserMessage } from '@deepseek-ai/dsh-llm';
 import type { Events } from '@deepseek-ai/cordis';
 import type {} from '@deepseek-ai/dsh-agent'; // registers agent/* events on Events
 import type { AgentState, StateRegistry } from './state.js';
@@ -30,6 +31,54 @@ export interface InjectDeps {
 
 /** Host-typed pre-step waterfall listener (0.4.0: tracks the real Events map). */
 export type PreStepListener = Events['agent/pre-step'];
+
+/**
+ * Bound for a `notice` summary — mirrors `dsh-llm`'s
+ * `CONTEXT_SUMMARY_MAX_CHARS` (message.d.ts, asserted by src/contract.ts and
+ * the inject unit test). Duplicated rather than imported: a profile-installed
+ * plugin cannot resolve `@deepseek-ai/*` at runtime (only the host's install
+ * tree can), so this package keeps zero runtime dsh imports beyond the
+ * schemastery Config schema it must construct itself.
+ */
+export const CONTEXT_SUMMARY_MAX_CHARS = 120;
+
+/** Ellipsize a producer summary exactly like `boundContextSummary`. */
+export function boundContextSummary(summary: string): string {
+  return summary.length <= CONTEXT_SUMMARY_MAX_CHARS
+    ? summary
+    : `${summary.slice(0, CONTEXT_SUMMARY_MAX_CHARS - 1)}…`;
+}
+
+/** Recursive freeze over the JSON-shaped message we hand to the log. */
+function deepFreeze<T>(value: T): T {
+  if (value !== null && typeof value === 'object') {
+    for (const item of Object.values(value as Record<string, unknown>)) deepFreeze(item);
+    Object.freeze(value);
+  }
+  return value;
+}
+
+/**
+ * Build one immutable, producer-attributed notice message. Equivalent to
+ * `createUserMessage({content, source})` from `@deepseek-ai/dsh-llm` (which
+ * mints `brandString(randomUUID())` and deep-freezes the clone), inlined so
+ * the plugin installs into any profile without host module resolution.
+ */
+export function createNoticeMessage(text: string, summary: string): UserMessage {
+  const message = {
+    id: randomUUID(),
+    role: 'user' as const,
+    content: [{ type: 'text' as const, text }],
+    source: {
+      // 0.2.0: no shared 'plugin' kind — every producer declares its own
+      // (MessageSourceMap augmentation in ./types.ts; F2/D10).
+      kind: 'bright-drift' as const,
+      form: 'notice' as const,
+      summary: boundContextSummary(summary),
+    },
+  };
+  return deepFreeze(message) as unknown as UserMessage; // id brand: MessageId
+}
 
 /** Load the baseline content copy for a record, memory cache → disk store (E18). */
 async function loadBaselineContent(
@@ -187,16 +236,7 @@ export async function buildInjection(
     tokens: estimateTokens(rendered.text),
   });
 
-  return createUserMessage({
-    content: [{ type: 'text', text: rendered.text }],
-    source: {
-      // 0.2.0: no shared 'plugin' kind — every producer declares its own
-      // (MessageSourceMap augmentation in ./types.ts; F2/D10).
-      kind: 'bright-drift',
-      form: 'notice',
-      summary: boundContextSummary(rendered.summary),
-    },
-  });
+  return createNoticeMessage(rendered.text, rendered.summary);
 }
 
 /**

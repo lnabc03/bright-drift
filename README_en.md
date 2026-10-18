@@ -57,29 +57,31 @@ pnpm -r build
 
 ```yaml
 overrides:
-  bright-drift-core: link:C:/absolute/path/to/bright-drift/packages/core
+  bright-drift-core: file:C:/absolute/path/to/bright-drift/packages/core
 ```
 
-Use an absolute path with forward slashes.
+Use an absolute path with forward slashes. **Use `file:`, not `link:`**: the plugin is installed into the profile as a self-contained unit and can only resolve its runtime dependencies from the profile's `node_modules`. A `link:` override does not materialize core into the profile — the plugin then fails to load with `bright-drift: failed to import`.
 
 3. Install into the profile **from the repo root** (relative specs are anchored to your invoking directory):
 
 ```bash
-dsh plugin --profile web add link:./packages/dsh-adapter
+dsh plugin --profile web add file:./packages/dsh-adapter
 ```
 
-This symlinks the adapter into `~/.dsh/profiles/web/node_modules/` and — because the adapter's `package.json` declares `dsh.bundle.patch` — automatically appends `bright-drift` to `dsh.profile.bundles`. No manual edit of `cordis.yml` or `cordis.patch.yml` is needed.
+This copies the adapter in its published shape (`lib/` + `cordis.patch.yml`) into `~/.dsh/profiles/web/node_modules/` and — because the adapter's `package.json` declares `dsh.bundle.patch` — automatically appends `bright-drift` to `dsh.profile.bundles`. No manual edit of `cordis.yml` or `cordis.patch.yml` is needed.
 
 4. Restart the profile, then verify:
 
 ```
 ~/.dsh/logs/bright-drift/<date>.log   →   {"event":"plugin.applied", ...}
+                                     →   {"event":"config.applied", ...}
+                                     →   {"event":"session.start", ...}
 ```
 
 Notes / troubleshooting:
 
-- `link:` tracks the live checkout: after code edits, run `pnpm -r build` and restart the profile. Moving or deleting the checkout breaks the profile — uninstall first if you plan to.
-- Windows: pnpm creates symlinks for `link:` deps; enable Developer Mode or run from an elevated shell if you hit `EPERM`.
+- `file:` is a **snapshot** install (equivalent to installing from npm): after code edits run `pnpm -r build`, re-run step 3, and restart the profile. For fast iteration you may temporarily switch to `link:./packages/dsh-adapter` — but its dependencies then resolve from the checkout's own `node_modules`, so that form does **not** prove the install works.
+- Windows: the `link:` form needs symlink privileges (enable Developer Mode or use an elevated shell on `EPERM`); `file:` avoids it.
 - Uninstall: `dsh plugin --profile web remove bright-drift` (the bundles entry is removed automatically).
 - If pnpm still errors on `workspace:*`, the override in step 2 is missing, misplaced (it goes in the **profile's** `pnpm-workspace.yaml`, not the repo's), or not an absolute path.
 
