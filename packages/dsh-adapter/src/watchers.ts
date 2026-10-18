@@ -1,6 +1,7 @@
 import { WorkspaceWatcher, createIgnoreMatcher, type WatchEvent } from 'bright-drift-core';
 import type { TimerService } from '@deepseek-ai/cordis-plugin-timer';
 import type { BrightDriftConfig } from './config.js';
+import { PROJECT_OVERRIDE_REL } from './config.js';
 import type { Logger } from './log.js';
 
 export interface WatchEntry {
@@ -46,6 +47,9 @@ export class WatchRegistry {
     const ignored = await createIgnoreMatcher(root, {
       respectGitignore: config.watch.respectGitignore,
       extraIgnore: config.watch.extraIgnore,
+      // §5.9 hot reload: the override file conventionally lives in a
+      // gitignored `.dsh/` directory, so the matcher must keep it visible.
+      forceInclude: [PROJECT_OVERRIDE_REL],
       onError: (e) => this.logger.error('ignore-rules', e, { root }),
     });
     const timer = this.timer;
@@ -84,6 +88,7 @@ export class WatchRegistry {
     entry.ignored = await createIgnoreMatcher(root, {
       respectGitignore: config.watch.respectGitignore,
       extraIgnore: config.watch.extraIgnore,
+      forceInclude: [PROJECT_OVERRIDE_REL],
       onError: (e) => this.logger.error('ignore-rules', e, { root }),
     });
     this.logger.log('watcher.ignore-refreshed', { root });

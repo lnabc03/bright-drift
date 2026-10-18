@@ -365,7 +365,7 @@ FORMATTED  src/util.ts（保存时自动格式化，仅空白差异）
 - 字段名与 0.1.x `settings.yaml` 的 `bright-drift:` 节**逐字一致**——dsh 启动时按 entry id 把旧节导入 profile patch（导入后旧文件改名 `settings.yaml.imported`），字段名若变，导入会被拒绝且用户配置永久搁浅。
 - schema 只做类型校验 + 默认值，不加 min/max 约束（0.1.x 的 mergeConfig 语义是"错类型回落默认"，0.2.0 下非法值会被 compositor 拒绝并记日志，不 crash 插件加载之外的任何东西——保持宽松即保持 fail-open）。
 
-**项目级覆盖**（不变）：插件自读 `<workspace>/.dsh/bright-drift.yml`（chokidar 顺带 watch，变更即重读），逐字段覆盖全局值。
+**项目级覆盖**（不变）：插件自读 `<workspace>/.dsh/bright-drift.yml`（chokidar 顺带 watch，变更即重读），逐字段覆盖全局值。**该路径必须 `forceInclude`**（0.4.0 修正，实测发现）：`.dsh/` 通常被仓库 `.gitignore` 忽略，若不对 override 文件及其父目录豁免，watcher 根本看不到它 → "编辑即热重载"是死路径（`/bright-drift nodiff` 因显式 reload 不受影响）。
 
 ```yaml
 # profile patch 的 entry config: / 项目级文件同构

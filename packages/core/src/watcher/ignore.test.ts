@@ -46,6 +46,29 @@ describe('createIgnoreMatcher', () => {
     expect(match('fixtures/sample.txt')).toBe(true);
     expect(match('src/a.ts')).toBe(false);
   });
+
+  it('forceInclude keeps a gitignored override file (and its dir) visible', async () => {
+    // The project override lives in `.dsh/`, which is conventionally
+    // gitignored — without forceInclude its edits never reach the pipeline.
+    await fs.writeFile(path.join(dir, '.gitignore'), '.dsh/\n');
+    const plain = await createIgnoreMatcher(dir);
+    expect(plain('.dsh/bright-drift.yml')).toBe(true);
+
+    const forced = await createIgnoreMatcher(dir, { forceInclude: ['.dsh/bright-drift.yml'] });
+    expect(forced('.dsh')).toBe(false); // ancestor stays traversable
+    expect(forced('.dsh/bright-drift.yml')).toBe(false); // the override itself
+    expect(forced('.dsh/other.json')).toBe(true); // siblings stay ignored
+    expect(forced('src/a.ts')).toBe(false); // no collateral widening
+  });
+
+  it('forceInclude also lifts a built-in table entry', async () => {
+    const match = await createIgnoreMatcher(dir, {
+      respectGitignore: false,
+      forceInclude: ['dist/keep.json'],
+    });
+    expect(match('dist/keep.json')).toBe(false);
+    expect(match('dist/other.js')).toBe(true);
+  });
 });
 
 describe('createPatternMatcher (D9)', () => {
