@@ -469,7 +469,7 @@ T1–T10 保留，修订与新增：
 2. **装配层单测（`src/index.test.ts`）**：mock Context 驱动 `apply()` 全装配——事件注册集合与 `{prepend:true}`、`agent/created` 返回 `undefined`、`enabled:false` 不挂 watcher、`agent/disposed`+`session/disposed` 幂等清理、`loader/volatile-update` 重应用不 remount、日志零 `.error`。
 3. **启动冒烟（`pnpm --filter bright-drift smoke`，运行期）**：隔离 `DSH_HOME` + 非 shipped profile + **真实安装形态 `dsh plugin add file:<repo>`**（不是符号链接——链接会让依赖从 checkout 自身 `node_modules` 解析，从而掩盖 D11 那类"装进去但解析不到"的失败）+ declarative agent（不调模型）。断言：安装副本能独立 `import` 自身依赖 → `plugin.applied/config.applied/session.start/watcher.acquired` → 零 `*.error`；随后编辑 profile patch 验证 volatile 热更新（第二次 `config.applied`、无 `plugin.disposed`）；再制造外部文件创建验证 watcher→`drift.detected` 链路（T1 检测半边；注入半边仍需模型 E2E）。
 
-**模型驱动 E2E 结果（2026-10，真实 profile）**：T1/T2/T3/T4/T7(E11)/T9/T12/T13 全部通过（含预算降级、D9 黑名单热重载、配置 volatile 热更新不 remount、回声抑制、多会话共享 watcher）；**PTC 变体（审计 R2）亦通过**——`DSH_TOOLS_MODE=ptc` 下 `run_code` 内嵌套的 read/edit/pwsh 仍完整触发 `tools/*`，callId 形如 `<root>:ptc:<n>`，归因与回声抑制不变，详见审计 §11.1。仍未覆盖：headless 一次性退出排水（R3）、compaction 折叠（R4）。
+**模型驱动 E2E 结果（2026-10，真实 profile）**：T1/T2/T3/T4/T7(E11)/T9/T12/T13 全部通过（含预算降级、D9 黑名单热重载、配置 volatile 热更新不 remount、回声抑制、多会话共享 watcher）；**PTC 变体（审计 R2）亦通过**——`DSH_TOOLS_MODE=ptc` 下 `run_code` 内嵌套的 read/edit/pwsh 仍完整触发 `tools/*`，callId 形如 `<root>:ptc:<n>`，归因与回声抑制不变，详见审计 §11.1；**headless 一次性退出（审计 R3）亦通过**——watcher 已 acquire 后进程仍在 4–5 秒内 exit 0，`plugin.disposed` 与两次 `persist.saved` 齐备，详见审计 §11.2。仅剩 compaction 折叠（R4）未做专项验证（属既有设计行为，非 0.2.0 回归）。
 
 模型驱动的 T1–T13 矩阵仍按本节执行（冒烟不替代之）。
 

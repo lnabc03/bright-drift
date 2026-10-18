@@ -579,3 +579,18 @@ Get-Content "$t\logs\bright-drift\*.log"
 | 会话健康 | 该会话 16 条事件、0 条 `*.error`；同 root 上两个会话仅 `watcher.acquired` 一次 | watcher refcount 共享在多会话下正确 |
 
 **结论**：R2 关闭——PTC 模式不需要任何额外代码路径，审计 §5-A11 的"维持单通道"决策在 PTC 下同样成立。副作用提醒：`run_code` 内的子派发 callId 形如 `<root>:ptc:<n>`，若将来新增按 callId 的持久键，必须按完整字符串（含后缀）处理，不能假定为纯 UUID。
+
+### 11.2 R3（headless 一次性退出排水）关闭
+
+§8 的 R3 担心"chokidar 吊住进程"。用新建的 `headless` 模板 profile（`bdheadless`，`file:` 安装本地构建）+ 临时工作区跑一次性任务，两次结果一致：
+
+| 指标 | Run 1（读文件任务） | Run 2（无工具任务） |
+|---|---|---|
+| 墙钟耗时 / 退出码 | 5.4s / 0 | 3.4s / 0 |
+| `plugin.applied` → `watcher.acquired` | 08:38.488 → 08:38.571（83ms） | 04:01.859 → 04:01.939（80ms） |
+| 业务事件 | `session.start`(startup) → `baseline.update(note.txt, read)` | 无（任务未触碰文件） |
+| 排水序列 | `persist.saved(turn-stopping)` → `plugin.disposed` → `persist.saved(teardown)` | 同左（`entries=0`） |
+
+关键判据：**watcher 已真实 acquire（chokidar 在跑）之后，进程仍在 4–5 秒内以 exit 0 自然退出**——即 `ctx.effect` 的 disposer 确实跑到了 `watchers.stopAll()`，事件循环没有被文件监听句柄占住。对照 M2 事故（teardown 缺失时 headless 以 10 分钟超时暴露），可确认该回归未在 0.2.0 复现。附带确认：`persist.saved` 出现两次（turn-stopping 与 teardown 各一次），重复 flush 幂等。
+
+**结论**：R3 关闭。headless 形态无需任何改动。
