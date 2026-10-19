@@ -20,7 +20,7 @@
 
 **工作量预估**：MVP 1.5 到 2 周；加 bridge 通道 1 周；加上游 `before_request` 与切换 1 到 1.5 周；加发布与文档 0.5 周。总计 4 到 5 周，与二期 CC adapter 的量级接近。
 
-补充：2026-10-19 已用隔离 `JCODE_HOME` 加 `jcode debug tool` 实测 `post_tool_feedback`，确认输出会以 `[post_tool_feedback]` 追加到工具结果，`pre_tool` / `post_tool` 字段与报告一致，hooks 数组形式可用，单 hook 输出在 8KB 处截断。实测记录见附录 D。
+补充：2026-10-19 已用隔离 `JCODE_HOME` 加 `jcode debug tool` 实测 `post_tool_feedback`，确认输出会以 `[post_tool_feedback]` 追加到工具结果，`pre_tool` / `post_tool` 字段与报告一致，hooks 数组形式可用，单 hook 输出在 8KB 处截断，带空格路径可正确引用，pre_tool 和 feedback 超时都会 fail-open。实测记录见附录 D。
 
 ---
 
@@ -954,6 +954,11 @@ FEEDBACK_MARKER
 8. `[hooks]` 的数组形式可以正常解析。配置 `post_tool_feedback = [hook1, hook2]` 后，两个 hook 都运行，输出按声明顺序拼接。
 9. `post_tool_feedback` 的单 hook 8KB 上限得到验证。hook1 输出 9000 个 `X`，工具结果里实际保留 8192 个 `X`，随后是 `[feedback truncated]`，再随后是 hook2 的 `HOOK2_END`。这与源码 `truncate_bytes(text, FEEDBACK_LIMIT)` 的行为一致。
 10. 失败的工具调用不会触发 `post_tool_feedback`。`read missing.txt` 只产生了 `pre_tool` 和 `post_tool`（`status=error`）事件，没有 feedback 事件，工具结果里也没有 `[post_tool_feedback]`。
+11. 带空格的 hook 路径可以正确执行。把临时目录命名为 `jcode-bd validate3 20261019`，并在命令串里用双引号包住脚本路径，所有 hook 都成功运行。这验证了安装器必须对可执行文件和脚本路径都做引用。
+12. `pre_tool` 超时 fail-open。`pre_tool_timeout_ms = 300`，hook 先写日志再睡眠 500ms。hook 在 300ms 时被终止，但 `write` 工具仍然执行成功，文件正常更新。
+13. `post_tool_feedback` 超时 fail-open。`post_tool_feedback_timeout_ms = 300`，第一个 hook 睡眠 500ms 后输出 `SLOW_MARKER`，它被终止且没有输出；后面的 `NONZERO_MARKER` 和 `SECOND_MARKER` 仍然正常追加。
+14. 非零退出码本身不影响 stdout 捕获。hook 用 `process.exitCode = 1` 正常退出时，`NONZERO_MARKER` 仍然被追加。但要注意：如果在 `process.stdout.write` 之后立即调用 `process.exit(1)`，Windows 上可能因为 stdout 未刷新而丢失输出。bright-drift 自己的 hook 应始终 exit 0 并让 Node 自然退出，避免这个坑。
+15. 已有 hook 与新增 hook 可以共存。`post_tool_feedback` 数组里同时放一个慢 hook、一个非零退出 hook 和一个正常 hook，三者都按顺序运行。这直接验证了安装器「保留用户已有 hook，再追加自己的命令」的策略在运行期可行。
 
 ### D.3 这次实测没有覆盖的内容
 
@@ -962,5 +967,6 @@ FEEDBACK_MARKER
 - `jcode api-bridge`、`noReply`、`softInterrupt` 在 Windows 上的实际行为。
 - 并行工具调用下的 hook 竞争。`jcode debug tool` 是串行调用。
 - 正常关闭会话时的 `session_end`。只验证了强制停止不会触发，未验证正常关闭路径。
+- `post_tool` detached 的精确延迟没有单独做基准测试。源码和事件顺序都支持 detached 语义，但报告里的「不阻塞工具返回」仍是源码结论加间接观察。
 
 这些仍是 M7.1 实现阶段需要补充的验收项。
