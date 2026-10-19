@@ -1021,7 +1021,7 @@ FEEDBACK_MARKER
 - **Orca** 仓库里有 Jcode 集成相关提交，见 [commit 4c2cb3c](https://github.com/stablyai/orca/commit/4c2cb3cf125454673e07c49f98fe6ebe265c21b9)。该提交属于已合并的 [PR #22539](https://github.com/stablyai/orca/pull/22539)；#22539 接管了更早的 [PR #10521](https://github.com/stablyai/orca/pull/10521)，而 #10521 本身是关闭未合并的。因此 Orca 的 Jcode 集成已合并，commit 里的 Jcode hook 事件文档和路径修复是有效 prior art。需要注意的是，该 PR 的验证主要在 macOS 完成，Windows 只做了代码审查，没有真机测试。
 - Orca 的修复采用**单引号包裹 hook 脚本路径**，因为单引号内反斜杠是字面量；只有路径本身含单引号时才退回双引号并转义 `\` 和 `"`。这比本报告最初只推荐「正斜杠 + 双引号」更稳健，安装器应优先采用单引号 wrapper 路径。
 - 本报告已在隔离 JCODE_HOME 中复现该形态：把 `.cmd` wrapper 放在带空格的目录，配置单引号路径，hook 正常执行。见附录 D 第 17 条。
-- **memor-cli** 是一个通过 hook 向多个 agent 注入记忆/上下文的工具。检索结果显示它的 hook server 在 agent 检测列表中包含 jcode，但本报告没有深入验证其集成深度。它是相邻的「hook 注入」prior art，不做工作区漂移检测，但说明 Jcode 的 hook 生态已经有第三方在做上下文注入。
+- **memor-ai / memor-cli** 已确认支持 jcode，但它的路径与本项目不同：`memor install-hook --agent jcode` 只把 `turn_end` / `session_end` 当作 ingest 触发，recall 则通过 MCP 的 `memor_recall` 工具让模型主动调用。它的文档基于 jcode v0.79.1，明确说「jcode 没有可改写工具输出的 hook」，并用 PATH shim 做工具输出压缩。这个结论基于旧版本；本报告实测的 v0.99.0 已经有 `post_tool_feedback`，它是同步的，stdout 会追加到工具结果。`post_tool` 本身仍然是 detached observer，stdout 被丢弃。memor-ai 的 MCP 方案正好反衬出 `post_tool_feedback` 是一个新的、可用的注入通道。它不做工作区漂移检测，但说明 Jcode 的 hook 生态已经有第三方在做上下文注入。
 
 ### E.3 Jcode 内置的相邻能力
 
