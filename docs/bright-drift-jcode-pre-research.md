@@ -20,7 +20,9 @@
 
 **工作量预估**：MVP 1.5 到 2 周；加 bridge 通道 1 周；加上游 `before_request` 与切换 1 到 1.5 周；加发布与文档 0.5 周。总计 4 到 5 周，与二期 CC adapter 的量级接近。
 
-补充：2026-10-19 已用隔离 `JCODE_HOME` 加 `jcode debug tool` 实测 `post_tool_feedback`，确认输出会以 `[post_tool_feedback]` 追加到工具结果，`pre_tool` / `post_tool` 字段与报告一致，hooks 数组形式可用，单 hook 输出在 8KB 处截断，pre_tool 和 feedback 超时都会 fail-open。另有一个关键安装约束：带空格的绝对 Node 路径无法直接作为 hook 命令启动，安装器应使用 PATH 中的 `node`，脚本路径统一用正斜杠并按需加引号。实测记录见附录 D。
+补充：2026-10-19 已用隔离 `JCODE_HOME` 加 `jcode debug tool` 实测 `post_tool_feedback`，确认输出会以 `[post_tool_feedback]` 追加到工具结果，`pre_tool` / `post_tool` 字段与报告一致，hooks 数组形式可用，单 hook 输出在 8KB 处截断，pre_tool 和 feedback 超时都会 fail-open。另有一个关键安装约束：带空格的绝对 Node 路径无法直接作为 hook 命令启动，安装器应生成单引号引用的 wrapper 脚本，由 wrapper 内部调用 Node。实测记录见附录 D。
+
+上游已有相关工作：#1185 / #1280 的 `pre_request` transform、#770 / #1549 的 `session_start_context`、#737 的原生 file/path watch。没有发现与 bright-drift 完全重复的 issue 或 PR，详见附录 E。
 
 ---
 
@@ -379,7 +381,7 @@ Jcode 的系统提示分层为：内置 base、能力模块、`AGENTS.md`、`.jc
 
 1. **M7.1**：实现方案 A，先把 adapter 跑通。
 2. **M7.2**：如果实测发现纯问答轮漏注入不可接受，再加方案 B 作为可选通道，默认关闭。
-3. **M7.3**：向上游提 `before_request` hook，合并后把 A 降级为 fallback，C 成为默认主通道。
+3. **M7.3**：支持/复用上游已有的 `pre_request` 方向（#1185 / #1280），合并后把 A 降级为 fallback，C 成为默认主通道。
 4. **M7.4**：加 MCP 诊断工具，可选。
 
 ---
@@ -572,21 +574,23 @@ Windows 上建议在 `analyzeCmd` 落地前默认 `watch.includeUntracked: true`
 
 ```toml
 [hooks]
-session_start = "node \"C:/Users/me/AppData/Local/bright-drift-jcode/hooks/session-start.js\""
-session_end = "node \"C:/Users/me/AppData/Local/bright-drift-jcode/hooks/session-end.js\""
-pre_tool = "node \"C:/Users/me/AppData/Local/bright-drift-jcode/hooks/pre-tool.js\""
-post_tool = "node \"C:/Users/me/AppData/Local/bright-drift-jcode/hooks/post-tool.js\""
-post_tool_feedback = "node \"C:/Users/me/AppData/Local/bright-drift-jcode/hooks/feedback.js\""
+session_start = "'C:\\Users\\me\\AppData\\Local\\bright-drift-jcode\\bin\\session-start.cmd'"
+session_end = "'C:\\Users\\me\\AppData\\Local\\bright-drift-jcode\\bin\\session-end.cmd'"
+pre_tool = "'C:\\Users\\me\\AppData\\Local\\bright-drift-jcode\\bin\\pre-tool.cmd'"
+post_tool = "'C:\\Users\\me\\AppData\\Local\\bright-drift-jcode\\bin\\post-tool.cmd'"
+post_tool_feedback = "'C:\\Users\\me\\AppData\\Local\\bright-drift-jcode\\bin\\feedback.cmd'"
 pre_tool_timeout_ms = 5000
 post_tool_feedback_timeout_ms = 10000
 ```
 
+上述形态用 **单引号包裹 wrapper 路径**。Jcode 的 hook tokenizer 在单引号内保留反斜杠字面量，因此 `'C:\Users\me\...\feedback.cmd'` 会作为一个完整路径传给 `exec`。wrapper 本身用 `node` 或绝对 Node 路径调用真正的 hook 脚本，路径引用问题由 wrapper 内部处理。本报告已用带空格的临时目录实测该形态可用；Orca 的 [commit 4c2cb3c](https://github.com/stablyai/orca/commit/4c2cb3cf125454673e07c49f98fe6ebe265c21b9) 也采用同一策略，并已在 Jcode 上使用。
+
 **不要直接写带空格的 Node 绝对路径。** 实测 Jcode 的 hook 命令解析器没有成功启动 `C:/.../node dir/node.exe "C:/.../hook.js"`，日志报 `program not found`。另外，解析器会把双引号内的反斜杠当作转义符剥离，`"C:\Users\..."` 会变成 `"C:Users..."`。因此：
 
-- 优先使用 PATH 中的 `node`，让 `Command::new("node")` 通过 PATH 解析。
-- 脚本路径统一写正斜杠；有空格时用双引号包住。
+- **首选**：生成一个 `.cmd`（Windows）或 `.sh`（POSIX）wrapper，用单引号把 wrapper 路径写进 hook 配置。wrapper 内部可以用双引号安全地调用 Node。
+- **次选**：直接写 `node "C:/.../hook.js"`，要求 `node` 在 PATH 中。本报告已实测该形态可用。
 - 如果 PATH 中没有 `node`，安装器应报错并提示用户，而不是写一个可能带空格的绝对路径。
-- 如果必须使用绝对路径，先确认该路径不含空格，并优先用正斜杠。
+- 如果必须写绝对 Node 路径，先确认该路径不含空格，并优先用正斜杠。
 
 如果用户已经有同名 key，值可能是字符串或数组。安装器要把它规范成数组并追加自己的命令，卸载时只移除完全匹配的那一项。
 
@@ -598,7 +602,8 @@ post_tool_feedback_timeout_ms = 10000
 - 如果 `[hooks]` 不存在，在文件末尾追加。
 - 写入用原子 rename，Windows 上对瞬时 EPERM 重试。
 - 自检时重新解析 TOML，确认结构合法。
-- 写入的脚本路径统一用正斜杠，避免 hook 解析器剥离反斜杠。
+- 如果直接写 Node + 脚本路径，脚本路径统一用正斜杠，避免 hook 解析器剥离反斜杠。
+- 如果使用 wrapper，wrapper 路径用单引号包裹，单引号内可以保留原生反斜杠。
 - 不要把带空格的 Node 绝对路径写进 hook 命令。
 
 不建议用「解析后整文件 stringify」的方案，除非能接受用户注释丢失。也不建议用环境变量覆盖，因为那要求用户换启动方式。
@@ -788,7 +793,7 @@ Jcode 支持 resume、fork、compact。注入文本必须：
 | Node hook 启动约 100ms | 工具调用变慢 | shim 早退、flag 文件、只对 bash/有 pending 时启动 Node |
 | Windows cmd.exe 无静态分析 | 新建未跟踪文件漏报 | MVP 开 `includeUntracked`；core 增加 `analyzeCmd` |
 | TOML 安装器改坏配置 | 用户 Jcode 无法启动 | 备份、UTF-8 原子写、行级编辑、安装后重新解析、doctor |
-| hook 命令解析器剥离双引号内反斜杠，且带空格的绝对可执行路径无法启动 | 安装后 hook 完全不运行 | 使用 PATH 中的 `node`；脚本路径用正斜杠；安装器自检 `node` 可用性 |
+| hook 命令解析器剥离双引号内反斜杠，且带空格的绝对可执行路径无法启动 | 安装后 hook 完全不运行 | 单引号 wrapper 路径；或使用 PATH 中的 `node` + 正斜杠脚本路径；安装器自检 |
 | `post_tool_feedback` 8KB 上限 | 大 diff 被截断 | core 预算 + 字节级截断 + 清单降级 |
 | 上下文保护拒绝工具输出 | feedback 可能丢失 | 在渲染时限制大小；必要时拆批；记录日志 |
 | bridge 需要常驻 | 用户配置成本 | 默认关闭；`bridgeAutoStart` 可选；doctor 明示 |
@@ -802,6 +807,16 @@ Jcode 支持 resume、fork、compact。注入文本必须：
 ---
 
 ## 10. 上游建议（Jcode）
+
+### 10.0 上游已有相关工作
+
+截至 2026-10-19，Jcode 仓库里已经存在与本项目高度相关的 issue 和 PR。详细对照见附录 E。最重要的三条：
+
+- **#1185 + PR #1280** 提出 `pre_request` transform hook，在每个 provider 请求前把完整请求 JSON 交给外部命令，允许重写 messages / tools / dynamic system prompt。这正是 bright-drift 需要的每请求注入点。PR 仍 open，维护者要求先做设计决策，review 还指出了 hook 子进程 I/O 的阻塞问题。
+- **#770 + PR #1549** 提出 `session_start_context`，在会话创建、attach、resume 时同步收集上下文并作为 system-reminder 注入。它只覆盖会话开始，不覆盖 turn 内工具循环，但适合 bright-drift 的静态概述。
+- **#737** 提出原生 file/path watch primitive，要求文件变化能作为事件注入对话。它是最接近 bright-drift 产品思路的 issue，但偏向 agent 主动 `watch_file`，不是被动监控整个工作区并做归因/diff。
+
+因此，上游建议的优先级应调整为：**优先支持 #1185 / #1280**，而不是另起一个 `before_request` 配置键；静态概述可以走 #1549。下面 10.1 的契约只作为「如果上游决定新增独立键」的参考。
 
 ### 10.1 `before_request` hook
 
@@ -857,6 +872,8 @@ session_id, content, display_role: "system" | "user" | "background_task"
 ## 11. 结论
 
 Jcode 的 hooks 体系足够支撑一个可用的 bright-drift adapter。`post_tool_feedback` 是目前最好的无侵入注入通道，语义接近 CC 的 Stop 补投，适合先做 MVP。它的主要缺口是纯问答轮无法注入，这个缺口可以用上游 `before_request` hook 彻底解决，改动量可控，且对 Jcode 生态有普遍价值。`jcode api-bridge` 可以作为过渡方案，但不应该成为默认依赖。
+
+上游已经有人在推进相邻能力：#1185 / #1280 的 `pre_request` transform 最接近每请求注入，#770 / #1549 的 `session_start_context` 适合会话级静态概述，#737 的原生 file/path watch 最接近产品思路。bright-drift 的差异点是被动监控、四类归因、内容基线和预算内 diff，这些没有被上述 proposal 覆盖。
 
 建议的决策：
 
@@ -970,6 +987,7 @@ FEEDBACK_MARKER
 14. 非零退出码本身不影响 stdout 捕获。hook 用 `process.exitCode = 1` 正常退出时，`NONZERO_MARKER` 仍然被追加。但要注意：如果在 `process.stdout.write` 之后立即调用 `process.exit(1)`，Windows 上可能因为 stdout 未刷新而丢失输出。bright-drift 自己的 hook 应始终 exit 0 并让 Node 自然退出，避免这个坑。
 15. 已有 hook 与新增 hook 可以共存。`post_tool_feedback` 数组里同时放一个慢 hook、一个非零退出 hook 和一个正常 hook，三者都按顺序运行。这直接验证了安装器「保留用户已有 hook，再追加自己的命令」的策略在运行期可行。
 16. 带空格的绝对 Node 路径不能直接作为 hook 命令。把 `node.exe` 复制到 `jcode-bd exe space 20261019/node dir/node.exe`，配置成 `"C:/.../node dir/node.exe" "C:/.../hook.js"` 后，Jcode 日志报 `program not found`。改成反斜杠路径会被解析器剥离，同样失败。结论是安装器不能依赖 `process.execPath` 或 `C:\Program Files\nodejs\node.exe` 这类带空格的绝对路径。
+17. 单引号包裹的 `.cmd` wrapper 路径可用。把 `hook.cmd` 放在带空格的目录 `jcode-bd wrapper 20261019`，配置写成 `'C:\...\jcode-bd wrapper 20261019\hook.cmd'`，wrapper 内部用 `"D:\nodejs\node.exe" "%~dp0hook.js"` 调用真正的 hook。结果 hook 正常执行并输出 `WRAPPER_MARKER`。这验证了安装器的首选形态：生成 wrapper，用单引号引用 wrapper 路径，由 wrapper 内部处理 Node 和脚本路径。
 
 ### D.3 这次实测没有覆盖的内容
 
@@ -981,3 +999,47 @@ FEEDBACK_MARKER
 - `post_tool` detached 的精确延迟没有单独做基准测试。源码和事件顺序都支持 detached 语义，但报告里的「不阻塞工具返回」仍是源码结论加间接观察。
 
 这些仍是 M7.1 实现阶段需要补充的验收项。
+
+## 附录 E：Jcode 上游 issue、PR 与同类思路
+
+检索时间：2026-10-19。以下状态均以该日为准。
+
+### E.1 直接相关的 issue / PR
+
+| 编号 | 类型与状态 | 标题 | 与本项目的关系 |
+|---|---|---|---|
+| [#737](https://github.com/1jehuang/jcode/issues/737) | issue，open，enhancement / priority medium / triage needs-decision | Feature request: native file/path watch primitive (Claude Code Monitor() equivalent) | 产品思路最接近。它要求监控文件或目录变化，并把 created/modified/deleted 事件注入对话，支持 debounce、start/stop/list。区别是它偏向 agent 主动 `watch_file`，而 bright-drift 是被动监控整个工作区、区分外部/自身/命令副作用，并渲染 diff。 |
+| [#770](https://github.com/1jehuang/jcode/issues/770) | issue，open，enhancement / priority medium / triage needs-decision | session_start hook cannot inject context into the model (observer-only) | 直接确认了 bright-drift 遇到的核心缺口：observer hook 的 stdout 被丢弃，无法注入上下文。它提出 `session_context` 或让 `session_start` opt-in 捕获 stdout。只覆盖会话开始，不覆盖 turn 内工具循环。 |
+| [#1185](https://github.com/1jehuang/jcode/issues/1185) | issue，open | pre_request transform hook: rewrite the provider-bound request before every call | 机制上最接近 bright-drift 需要的「每请求注入」。它让外部命令拿到完整请求 JSON，并允许重写 messages / tools / dynamic system prompt。维护者已回复需要设计决策，尚未合入。 |
+| [#1280](https://github.com/1jehuang/jcode/pull/1280) | PR，open，type feature / area config / security | pre_request transform hook: rewrite the provider-bound request before every call | #1185 的实现 PR。已有 21 个 hook 测试和 fork 实现，但 review 仍指出 hook 子进程 I/O 的阻塞问题，尚未合并。bright-drift 应直接支持这个方向，而不是另造一个 `before_request` 键。 |
+| [#1549](https://github.com/1jehuang/jcode/pull/1549) | PR，open | hooks: add synchronous session_start_context providers | 关闭 #770 的实现。新增 `session_start_context`，在 create/attach/resume 时同步收集 stdout，作为一条 system-reminder 注入；支持 Claude Code 形状的 `additionalContext`，上限 8000 字符。review 仍指出超时子进程、超大 JSON、resume 延迟等问题。适合 bright-drift 的静态概述，不适合 turn 内漂移。 |
+| [#900](https://github.com/1jehuang/jcode/issues/900) | issue，open | prompt-overlay.md / AGENTS.md re-read on every turn invalidate the provider prompt cache | 反例和价值验证。它记录了用动态 prompt-overlay 注入实时状态导致每轮约 97K tokens 缓存失效的事故。bright-drift 必须把漂移作为尾部消息注入，不能改系统提示或 overlay。 |
+| [#833](https://github.com/1jehuang/jcode/issues/833) | issue，open | Host-level shared state: every session on the same host can see the other sessions' digest | 相邻思路。它用外部 watcher shim 聚合会话状态，并通过静态 prompt-overlay 让模型主动读取文件。它不是文件漂移检测，但同样说明 Jcode 缺少原生的动态上下文注入。 |
+
+### E.2 第三方 prior art
+
+- **Orca** 已经把 Jcode 作为支持的 TUI agent，见 [PR #10521](https://github.com/stablyai/orca/pull/10521)。它的 [commit 4c2cb3c](https://github.com/stablyai/orca/commit/4c2cb3cf125454673e07c49f98fe6ebe265c21b9) 专门修复了 Jcode hook 路径引用问题，并留下了完整的 `docs/reference/jcode-hook-events.md`。这独立验证了本报告的两个结论：hooks 可以支撑第三方集成；路径必须按 Jcode 的 shell-style tokenizer 正确引用。
+- Orca 的修复采用**单引号包裹 hook 脚本路径**，因为单引号内反斜杠是字面量；只有路径本身含单引号时才退回双引号并转义 `\` 和 `"`。这比本报告最初只推荐「正斜杠 + 双引号」更稳健，安装器应优先采用单引号 wrapper 路径。
+- 本报告已在隔离 JCODE_HOME 中复现该形态：把 `.cmd` wrapper 放在带空格的目录，配置单引号路径，hook 正常执行。见附录 D 第 17 条。
+- **memor-cli** 是一个通过 hook 向多个 agent 注入记忆/上下文的工具，支持 Claude、Cursor、Codex、Copilot、Kimi、Goose 和 jcode。它是相邻的「hook 注入」prior art，不做工作区漂移检测，但说明 Jcode 的 hook 生态已经有第三方在做上下文注入。
+
+### E.3 Jcode 内置的相邻能力
+
+- **swarm file touch notifications**：`docs/SWARM_ARCHITECTURE.md:311-322` 说明 swarm 用 file touch 做冲突检测，A 改了 B 读过的文件会通知 B。它只覆盖 swarm 内部 agent，不覆盖用户手动编辑、外部进程、IDE 保存，也没有归因和 diff 预算。
+- **SDK 的 `noReply` / `softInterrupt`**：位于 `SendMessage` 和 `SoftInterrupt` 协议里，可以在空闲时写入上下文、在忙碌时于安全点插入消息。它不是 issue/PR，但已经是可用的注入机制，本报告第 3.6 节已评估。
+
+### E.4 结论
+
+没有发现与 bright-drift 完全重复的 issue 或 PR。最接近的组合是：
+
+- **产品思路**：#737 的原生 file/path watch。
+- **注入机制**：#1185 / #1280 的 `pre_request` transform。
+- **会话级上下文**：#770 / #1549 的 `session_start_context`。
+
+bright-drift 的差异点仍然是：被动监控整个工作区、区分 A/B/C/D 四类来源、保留内容基线、按预算渲染 diff、在投递确认后才提交基线。这些是 #737 和 #1549 都没有覆盖的。
+
+建议的行动：
+
+1. 在 #1185 / #1280 下补充 bright-drift 的 use case：每个 provider 请求前追加一条尾部 system-reminder，内容来自本地预渲染文件，不改静态前缀。
+2. 如果维护者更倾向 #1549，则把 #1549 用于会话启动时的静态概述，turn 内漂移继续走 `post_tool_feedback` 或 bridge。
+3. 安装器采用 Orca 的单引号 wrapper 路径策略，避免带空格和反斜杠的路径再次踩坑。
