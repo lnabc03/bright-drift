@@ -20,7 +20,7 @@
 
 **工作量预估**：MVP 1.5 到 2 周；加 bridge 通道 1 周；加上游 `before_request` 与切换 1 到 1.5 周；加发布与文档 0.5 周。总计 4 到 5 周，与二期 CC adapter 的量级接近。
 
-补充：2026-10-19 已用隔离 `JCODE_HOME` 加 `jcode debug tool` 实测 `post_tool_feedback`，确认输出会以 `[post_tool_feedback]` 追加到工具结果，`pre_tool` / `post_tool` 字段与报告一致，hooks 数组形式可用，单 hook 输出在 8KB 处截断，带空格路径可正确引用，pre_tool 和 feedback 超时都会 fail-open。实测记录见附录 D。
+补充：2026-10-19 已用隔离 `JCODE_HOME` 加 `jcode debug tool` 实测 `post_tool_feedback`，确认输出会以 `[post_tool_feedback]` 追加到工具结果，`pre_tool` / `post_tool` 字段与报告一致，hooks 数组形式可用，单 hook 输出在 8KB 处截断，pre_tool 和 feedback 超时都会 fail-open。另有一个关键安装约束：带空格的绝对 Node 路径无法直接作为 hook 命令启动，安装器应使用 PATH 中的 `node`，脚本路径统一用正斜杠并按需加引号。实测记录见附录 D。
 
 ---
 
@@ -568,18 +568,25 @@ Windows 上建议在 `analyzeCmd` 落地前默认 `watch.includeUntracked: true`
 3. 自检：Node 路径、hook 文件存在、版本兼容、状态目录可写。
 4. 卸载：只删除自己的命令，保留用户已有 hooks。
 
-命令示例：
+命令示例（推荐形态）：
 
 ```toml
 [hooks]
-session_start = "C:\\Program Files\\nodejs\\node.exe \"C:\\Users\\me\\AppData\\Local\\...\\hooks\\session-start.js\""
-session_end = "..."
-pre_tool = "..."
-post_tool = "..."
-post_tool_feedback = "..."
+session_start = "node \"C:/Users/me/AppData/Local/bright-drift-jcode/hooks/session-start.js\""
+session_end = "node \"C:/Users/me/AppData/Local/bright-drift-jcode/hooks/session-end.js\""
+pre_tool = "node \"C:/Users/me/AppData/Local/bright-drift-jcode/hooks/pre-tool.js\""
+post_tool = "node \"C:/Users/me/AppData/Local/bright-drift-jcode/hooks/post-tool.js\""
+post_tool_feedback = "node \"C:/Users/me/AppData/Local/bright-drift-jcode/hooks/feedback.js\""
 pre_tool_timeout_ms = 5000
 post_tool_feedback_timeout_ms = 10000
 ```
+
+**不要直接写带空格的 Node 绝对路径。** 实测 Jcode 的 hook 命令解析器没有成功启动 `C:/.../node dir/node.exe "C:/.../hook.js"`，日志报 `program not found`。另外，解析器会把双引号内的反斜杠当作转义符剥离，`"C:\Users\..."` 会变成 `"C:Users..."`。因此：
+
+- 优先使用 PATH 中的 `node`，让 `Command::new("node")` 通过 PATH 解析。
+- 脚本路径统一写正斜杠；有空格时用双引号包住。
+- 如果 PATH 中没有 `node`，安装器应报错并提示用户，而不是写一个可能带空格的绝对路径。
+- 如果必须使用绝对路径，先确认该路径不含空格，并优先用正斜杠。
 
 如果用户已经有同名 key，值可能是字符串或数组。安装器要把它规范成数组并追加自己的命令，卸载时只移除完全匹配的那一项。
 
@@ -591,6 +598,8 @@ post_tool_feedback_timeout_ms = 10000
 - 如果 `[hooks]` 不存在，在文件末尾追加。
 - 写入用原子 rename，Windows 上对瞬时 EPERM 重试。
 - 自检时重新解析 TOML，确认结构合法。
+- 写入的脚本路径统一用正斜杠，避免 hook 解析器剥离反斜杠。
+- 不要把带空格的 Node 绝对路径写进 hook 命令。
 
 不建议用「解析后整文件 stringify」的方案，除非能接受用户注释丢失。也不建议用环境变量覆盖，因为那要求用户换启动方式。
 
@@ -779,6 +788,7 @@ Jcode 支持 resume、fork、compact。注入文本必须：
 | Node hook 启动约 100ms | 工具调用变慢 | shim 早退、flag 文件、只对 bash/有 pending 时启动 Node |
 | Windows cmd.exe 无静态分析 | 新建未跟踪文件漏报 | MVP 开 `includeUntracked`；core 增加 `analyzeCmd` |
 | TOML 安装器改坏配置 | 用户 Jcode 无法启动 | 备份、UTF-8 原子写、行级编辑、安装后重新解析、doctor |
+| hook 命令解析器剥离双引号内反斜杠，且带空格的绝对可执行路径无法启动 | 安装后 hook 完全不运行 | 使用 PATH 中的 `node`；脚本路径用正斜杠；安装器自检 `node` 可用性 |
 | `post_tool_feedback` 8KB 上限 | 大 diff 被截断 | core 预算 + 字节级截断 + 清单降级 |
 | 上下文保护拒绝工具输出 | feedback 可能丢失 | 在渲染时限制大小；必要时拆批；记录日志 |
 | bridge 需要常驻 | 用户配置成本 | 默认关闭；`bridgeAutoStart` 可选；doctor 明示 |
@@ -954,11 +964,12 @@ FEEDBACK_MARKER
 8. `[hooks]` 的数组形式可以正常解析。配置 `post_tool_feedback = [hook1, hook2]` 后，两个 hook 都运行，输出按声明顺序拼接。
 9. `post_tool_feedback` 的单 hook 8KB 上限得到验证。hook1 输出 9000 个 `X`，工具结果里实际保留 8192 个 `X`，随后是 `[feedback truncated]`，再随后是 hook2 的 `HOOK2_END`。这与源码 `truncate_bytes(text, FEEDBACK_LIMIT)` 的行为一致。
 10. 失败的工具调用不会触发 `post_tool_feedback`。`read missing.txt` 只产生了 `pre_tool` 和 `post_tool`（`status=error`）事件，没有 feedback 事件，工具结果里也没有 `[post_tool_feedback]`。
-11. 带空格的脚本路径可以正确执行。把临时目录命名为 `jcode-bd validate3 20261019`，并在命令串里用双引号包住脚本路径，所有 hook 都成功运行。这验证了安装器必须对脚本路径加引号；可执行文件路径遵循同一解析规则，也应一并加引号。本次没有单独测试可执行文件路径带空格的情况。
+11. 带空格的脚本路径可以正确执行，前提是使用 PATH 中的 `node`。配置写成 `node "C:/Users/.../jcode-bd validate3 20261019/hook.js"` 时，hook 正常运行并输出标记。这验证了安装器应使用 PATH 中的 `node`，并对带空格的脚本路径加引号。
 12. `pre_tool` 超时 fail-open。`pre_tool_timeout_ms = 300`，hook 先写日志再睡眠 500ms。hook 在 300ms 时被终止，但 `write` 工具仍然执行成功，文件正常更新。
 13. `post_tool_feedback` 超时 fail-open。`post_tool_feedback_timeout_ms = 300`，第一个 hook 睡眠 500ms 后输出 `SLOW_MARKER`，它被终止且没有输出；后面的 `NONZERO_MARKER` 和 `SECOND_MARKER` 仍然正常追加。
 14. 非零退出码本身不影响 stdout 捕获。hook 用 `process.exitCode = 1` 正常退出时，`NONZERO_MARKER` 仍然被追加。但要注意：如果在 `process.stdout.write` 之后立即调用 `process.exit(1)`，Windows 上可能因为 stdout 未刷新而丢失输出。bright-drift 自己的 hook 应始终 exit 0 并让 Node 自然退出，避免这个坑。
 15. 已有 hook 与新增 hook 可以共存。`post_tool_feedback` 数组里同时放一个慢 hook、一个非零退出 hook 和一个正常 hook，三者都按顺序运行。这直接验证了安装器「保留用户已有 hook，再追加自己的命令」的策略在运行期可行。
+16. 带空格的绝对 Node 路径不能直接作为 hook 命令。把 `node.exe` 复制到 `jcode-bd exe space 20261019/node dir/node.exe`，配置成 `"C:/.../node dir/node.exe" "C:/.../hook.js"` 后，Jcode 日志报 `program not found`。改成反斜杠路径会被解析器剥离，同样失败。结论是安装器不能依赖 `process.execPath` 或 `C:\Program Files\nodejs\node.exe` 这类带空格的绝对路径。
 
 ### D.3 这次实测没有覆盖的内容
 
