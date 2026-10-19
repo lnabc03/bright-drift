@@ -954,7 +954,7 @@ FEEDBACK_MARKER
 8. `[hooks]` 的数组形式可以正常解析。配置 `post_tool_feedback = [hook1, hook2]` 后，两个 hook 都运行，输出按声明顺序拼接。
 9. `post_tool_feedback` 的单 hook 8KB 上限得到验证。hook1 输出 9000 个 `X`，工具结果里实际保留 8192 个 `X`，随后是 `[feedback truncated]`，再随后是 hook2 的 `HOOK2_END`。这与源码 `truncate_bytes(text, FEEDBACK_LIMIT)` 的行为一致。
 10. 失败的工具调用不会触发 `post_tool_feedback`。`read missing.txt` 只产生了 `pre_tool` 和 `post_tool`（`status=error`）事件，没有 feedback 事件，工具结果里也没有 `[post_tool_feedback]`。
-11. 带空格的 hook 路径可以正确执行。把临时目录命名为 `jcode-bd validate3 20261019`，并在命令串里用双引号包住脚本路径，所有 hook 都成功运行。这验证了安装器必须对可执行文件和脚本路径都做引用。
+11. 带空格的脚本路径可以正确执行。把临时目录命名为 `jcode-bd validate3 20261019`，并在命令串里用双引号包住脚本路径，所有 hook 都成功运行。这验证了安装器必须对脚本路径加引号；可执行文件路径遵循同一解析规则，也应一并加引号。本次没有单独测试可执行文件路径带空格的情况。
 12. `pre_tool` 超时 fail-open。`pre_tool_timeout_ms = 300`，hook 先写日志再睡眠 500ms。hook 在 300ms 时被终止，但 `write` 工具仍然执行成功，文件正常更新。
 13. `post_tool_feedback` 超时 fail-open。`post_tool_feedback_timeout_ms = 300`，第一个 hook 睡眠 500ms 后输出 `SLOW_MARKER`，它被终止且没有输出；后面的 `NONZERO_MARKER` 和 `SECOND_MARKER` 仍然正常追加。
 14. 非零退出码本身不影响 stdout 捕获。hook 用 `process.exitCode = 1` 正常退出时，`NONZERO_MARKER` 仍然被追加。但要注意：如果在 `process.stdout.write` 之后立即调用 `process.exit(1)`，Windows 上可能因为 stdout 未刷新而丢失输出。bright-drift 自己的 hook 应始终 exit 0 并让 Node 自然退出，避免这个坑。
