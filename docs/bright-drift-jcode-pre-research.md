@@ -20,6 +20,8 @@
 
 **工作量预估**：MVP 1.5 到 2 周；加 bridge 通道 1 周；加上游 `before_request` 与切换 1 到 1.5 周；加发布与文档 0.5 周。总计 4 到 5 周，与二期 CC adapter 的量级接近。
 
+补充：2026-10-19 已用隔离 `JCODE_HOME` 加 `jcode debug tool` 实测 `post_tool_feedback`，确认输出会以 `[post_tool_feedback]` 追加到工具结果，且 `pre_tool` / `post_tool` 的字段与报告一致。实测记录见附录 D。
+
 ---
 
 ## 1. 调研范围与方法
@@ -919,3 +921,43 @@ Jcode 的 hooks 体系足够支撑一个可用的 bright-drift adapter。`post_t
 - Jcode 未来是否会把 hooks 改为插件 ABI。
 
 这些应在 M7.1 的实现阶段用实测补齐。
+
+## 附录 D：沙盒实测记录（2026-10-19）
+
+### D.1 环境
+
+- 隔离 `JCODE_HOME`：临时目录，配置只包含 `[display] debug_socket = true` 与 `[hooks]`。
+- 隔离工作区：临时目录。
+- 启动方式：`jcode serve --socket <temp>/jcode.sock --debug-socket -C <temp>/workspace`。
+- 触发方式：`jcode debug --socket <temp>/jcode.sock -S <session_id> tool "write {...}"` 与 `tool "read {...}"`。
+- hook 脚本：Node 脚本，记录 `JCODE_HOOK_*` 环境变量和 stdin，并对 `post_tool_feedback` 输出 `FEEDBACK_MARKER`。
+- 未向真实 `~/.jcode` 写入任何内容，测试后已删除临时目录。
+
+### D.2 观测到的行为
+
+1. `session_start` 在 `create_session` 后触发，携带正确的 `JCODE_HOOK_SESSION_ID` 和 `JCODE_HOOK_CWD`。
+2. `pre_tool` 在 `write` 和 `read` 前触发，携带 `JCODE_HOOK_TOOL_NAME`、`JCODE_HOOK_TOOL_INPUT`，完整输入同时出现在 stdin。
+3. `post_tool` 在工具成功后触发，携带 `JCODE_HOOK_STATUS=ok`、`JCODE_HOOK_TOUCHED_PATHS`（绝对路径）和 `JCODE_HOOK_TOOL_INPUT`。`post_tool` 的 stdin 为空，符合源码语义。
+4. `post_tool_feedback` 在同一工具成功后触发，stdin 是完整工具输入 JSON。它的 stdout 被追加到工具结果，实际输出形如：
+
+```
+Created hello.txt (1 lines):
+...
+
+[post_tool_feedback]
+FEEDBACK_MARKER
+```
+
+5. `JCODE_HOOK_PAYLOAD` 包含 `event`、`session_id`、`cwd`、`tool_name`、`tool_input`、`tool_call_id`、`touched_paths`、`status`、`duration_ms`、`output_bytes` 等字段，与报告中的字段表一致。
+6. `read` 的 `touched_paths` 正确指向被读文件，`write` 的 `touched_paths` 正确指向写入文件。这说明 AKB 观察可以直接复用这两个事件。
+7. 使用 `jcode server stop --force` 强制停止沙盒服务时，没有观测到 `session_end`。这与源码一致：`session_end` 只在正常关闭路径触发，崩溃或被强杀需要 daemon 的空闲清扫和冷启动对账兜底。
+
+### D.3 这次实测没有覆盖的内容
+
+- 真实模型 turn 下的注入时序。`jcode debug tool` 直接调用工具，不经过模型请求，因此只能验证 hook 契约和文本追加，不能验证「模型下一次请求看到」的端到端路径。
+- `post_tool_feedback` 的 8KB 截断。源码已核实，但未在沙盒中构造超长输出。
+- `pre_tool` 的 exit 2 阻断语义。bright-drift 不使用该语义，未测试。
+- `jcode api-bridge`、`noReply`、`softInterrupt` 在 Windows 上的实际行为。
+- 并行工具调用下的 hook 竞争。`jcode debug tool` 是串行调用。
+
+这些仍是 M7.1 实现阶段需要补充的验收项。
