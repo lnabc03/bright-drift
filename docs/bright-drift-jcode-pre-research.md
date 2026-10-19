@@ -1018,7 +1018,7 @@ FEEDBACK_MARKER
 
 ### E.2 第三方 prior art
 
-- **Orca** 仓库里有 Jcode 集成相关提交，见 [commit 4c2cb3c](https://github.com/stablyai/orca/commit/4c2cb3cf125454673e07c49f98fe6ebe265c21b9)。对应的 [PR #10521](https://github.com/stablyai/orca/pull/10521) 已关闭但未合并（`merged_at=null`），因此不能把它当作已合并的官方支持。不过该 commit 里的 Jcode hook 事件文档和路径修复仍是有效 prior art：它独立验证了 hooks 可以支撑第三方集成，以及路径必须按 Jcode 的 shell-style tokenizer 正确引用。
+- **Orca** 仓库里有 Jcode 集成相关提交，见 [commit 4c2cb3c](https://github.com/stablyai/orca/commit/4c2cb3cf125454673e07c49f98fe6ebe265c21b9)。该提交属于已合并的 [PR #22539](https://github.com/stablyai/orca/pull/22539)；#22539 接管了更早的 [PR #10521](https://github.com/stablyai/orca/pull/10521)，而 #10521 本身是关闭未合并的。因此 Orca 的 Jcode 集成已合并，commit 里的 Jcode hook 事件文档和路径修复是有效 prior art。需要注意的是，该 PR 的验证主要在 macOS 完成，Windows 只做了代码审查，没有真机测试。
 - Orca 的修复采用**单引号包裹 hook 脚本路径**，因为单引号内反斜杠是字面量；只有路径本身含单引号时才退回双引号并转义 `\` 和 `"`。这比本报告最初只推荐「正斜杠 + 双引号」更稳健，安装器应优先采用单引号 wrapper 路径。
 - 本报告已在隔离 JCODE_HOME 中复现该形态：把 `.cmd` wrapper 放在带空格的目录，配置单引号路径，hook 正常执行。见附录 D 第 17 条。
 - **memor-cli** 是一个通过 hook 向多个 agent 注入记忆/上下文的工具。检索结果显示它的 hook server 在 agent 检测列表中包含 jcode，但本报告没有深入验证其集成深度。它是相邻的「hook 注入」prior art，不做工作区漂移检测，但说明 Jcode 的 hook 生态已经有第三方在做上下文注入。
