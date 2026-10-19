@@ -20,7 +20,7 @@
 
 **工作量预估**：MVP 1.5 到 2 周；加 bridge 通道 1 周；加上游 `before_request` 与切换 1 到 1.5 周；加发布与文档 0.5 周。总计 4 到 5 周，与二期 CC adapter 的量级接近。
 
-补充：2026-10-19 已用隔离 `JCODE_HOME` 加 `jcode debug tool` 实测 `post_tool_feedback`，确认输出会以 `[post_tool_feedback]` 追加到工具结果，且 `pre_tool` / `post_tool` 的字段与报告一致。实测记录见附录 D。
+补充：2026-10-19 已用隔离 `JCODE_HOME` 加 `jcode debug tool` 实测 `post_tool_feedback`，确认输出会以 `[post_tool_feedback]` 追加到工具结果，`pre_tool` / `post_tool` 字段与报告一致，hooks 数组形式可用，单 hook 输出在 8KB 处截断。实测记录见附录 D。
 
 ---
 
@@ -951,13 +951,16 @@ FEEDBACK_MARKER
 5. `JCODE_HOOK_PAYLOAD` 包含 `event`、`session_id`、`cwd`、`tool_name`、`tool_input`、`tool_call_id`、`touched_paths`、`status`、`duration_ms`、`output_bytes` 等字段，与报告中的字段表一致。
 6. `read` 的 `touched_paths` 正确指向被读文件，`write` 的 `touched_paths` 正确指向写入文件。这说明 AKB 观察可以直接复用这两个事件。
 7. 使用 `jcode server stop --force` 强制停止沙盒服务时，没有观测到 `session_end`。这与源码一致：`session_end` 只在正常关闭路径触发，崩溃或被强杀需要 daemon 的空闲清扫和冷启动对账兜底。
+8. `[hooks]` 的数组形式可以正常解析。配置 `post_tool_feedback = [hook1, hook2]` 后，两个 hook 都运行，输出按声明顺序拼接。
+9. `post_tool_feedback` 的单 hook 8KB 上限得到验证。hook1 输出 9000 个 `X`，工具结果里实际保留 8192 个 `X`，随后是 `[feedback truncated]`，再随后是 hook2 的 `HOOK2_END`。这与源码 `truncate_bytes(text, FEEDBACK_LIMIT)` 的行为一致。
+10. 失败的工具调用不会触发 `post_tool_feedback`。`read missing.txt` 只产生了 `pre_tool` 和 `post_tool`（`status=error`）事件，没有 feedback 事件，工具结果里也没有 `[post_tool_feedback]`。
 
 ### D.3 这次实测没有覆盖的内容
 
 - 真实模型 turn 下的注入时序。`jcode debug tool` 直接调用工具，不经过模型请求，因此只能验证 hook 契约和文本追加，不能验证「模型下一次请求看到」的端到端路径。
-- `post_tool_feedback` 的 8KB 截断。源码已核实，但未在沙盒中构造超长输出。
 - `pre_tool` 的 exit 2 阻断语义。bright-drift 不使用该语义，未测试。
 - `jcode api-bridge`、`noReply`、`softInterrupt` 在 Windows 上的实际行为。
 - 并行工具调用下的 hook 竞争。`jcode debug tool` 是串行调用。
+- 正常关闭会话时的 `session_end`。只验证了强制停止不会触发，未验证正常关闭路径。
 
 这些仍是 M7.1 实现阶段需要补充的验收项。
