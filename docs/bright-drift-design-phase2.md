@@ -332,6 +332,7 @@ npx bright-drift-claude-code uninstall
 ```
 
 1. 读取目标 settings.json → 合并 `hooks` 节的 8 个条目（SessionStart/UserPromptSubmit/PostToolUse/PostToolUseFailure/PermissionDenied/PreToolUse/Stop/SessionEnd），exec form 指向 `node_modules/bright-drift-claude-code/lib/hooks/*.js` 绝对路径。**合并而非覆盖**：已有其他 hook 条目原样保留，按 `command` 字符串识别自家条目做幂等更新。
+   - **稳定路径重定位（2026-11 修复）**：从 npx 缓存（路径含 `_npx`）或临时解包目录运行时，安装器先把整个 `lib/` 复制到 `<claude>/bright-drift/runtime/lib/`，再让 hooks 与斜杠命令指向该副本。否则 npm 清理 `_npx` 后所有 hook 以 `MODULE_NOT_FOUND` 失败，注入静默中断（2026-09/10 实际事故：日志停在 09-28，npx 目录 10-09 已被清除）。稳定安装（全局 npm/pnpm、本地检出）原地使用，不做复制；每次 install 整目录替换副本，install 仍是唯一同步点。
 2. 写 `install.json` 版本戳 `{ version, installedAt, hooksPath, settingsTarget }`；每次 install 重跑即升级（换路径 + 刷版本戳）。
 3. 自检：install 末尾 dry-run 一次 session-start hook（直接 spawn 执行），确认 node 可用、路径可达、daemon 能拉起；失败打印修复指引。
 4. 卸载：摘除自家 hook 条目、停 daemon（读 lock pid 后 SIGTERM）、保留状态目录（`--purge` 才删）。

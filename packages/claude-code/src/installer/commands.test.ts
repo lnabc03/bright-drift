@@ -14,6 +14,9 @@ beforeEach(async () => {
   process.env.BRIGHT_DRIFT_STATE_HOME = path.join(dir, 'state');
   process.env.CLAUDE_CONFIG_DIR = path.join(dir, 'claude-home');
   process.env.BRIGHT_DRIFT_HOOKS_DIR = path.join(dir, 'pkg', 'lib', 'hooks');
+  // Temp installs are relocated (npx-cache guard), so the fixture lib/ must exist.
+  await fs.mkdir(process.env.BRIGHT_DRIFT_HOOKS_DIR, { recursive: true });
+  await fs.writeFile(path.join(dir, 'pkg', 'lib', 'cli.js'), '// fixture\n');
   process.chdir(dir);
 });
 
