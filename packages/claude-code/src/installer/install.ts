@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { promises as fs } from 'node:fs';
+import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { atomicWriteFile, readJsonFile } from '../shared/atomic.js';
@@ -45,6 +46,60 @@ export function hooksDir(): string {
   if (process.env.BRIGHT_DRIFT_HOOKS_DIR) return process.env.BRIGHT_DRIFT_HOOKS_DIR;
   const here = path.dirname(fileURLToPath(import.meta.url));
   return path.join(here, 'hooks');
+}
+
+/**
+ * Locations that can disappear between sessions: the npx cache (`_npx`) and
+ * temporary extraction directories. Hooks pointing there fail with
+ * MODULE_NOT_FOUND once npm prunes the cache (observed 2026-11: logs stopped
+ * 2026-09-28, `_npx/<hash>` was gone by 2026-10-09). Installs from such
+ * locations must be relocated before hooks are written.
+ */
+export function isEphemeralLocation(p: string): boolean {
+  const norm = path.resolve(p).replaceAll('\\', '/').toLowerCase();
+  if (norm.split('/').includes('_npx')) return true;
+  const tmp = path.resolve(tmpdir()).replaceAll('\\', '/').toLowerCase();
+  return norm === tmp || norm.startsWith(`${tmp}/`);
+}
+
+/**
+ * Stable home for the deployed runtime. Deliberately outside the state root:
+ * `uninstall --purge` deletes the state root but must not strand live hooks.
+ */
+export function runtimeRoot(): string {
+  return path.join(claudeConfigDir(), 'bright-drift', 'runtime');
+}
+
+/**
+ * Return a hooks dir that will still exist next session. A package running
+ * from a stable install (global npm/pnpm, local checkout) is used in place;
+ * an ephemeral one (npx cache, temp dir) is copied wholesale to
+ * `<claude>/bright-drift/runtime/lib` and hooks point there. `install` is the
+ * only sync point, so the previous copy is replaced on every run.
+ */
+export async function deployStableHooks(sourceHooksDir: string): Promise<string> {
+  if (!isEphemeralLocation(sourceHooksDir)) return sourceHooksDir;
+  const sourceLib = path.dirname(sourceHooksDir);
+  const targetLib = path.join(runtimeRoot(), 'lib');
+  await fs.rm(targetLib, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  await fs.mkdir(path.dirname(targetLib), { recursive: true });
+  await fs.cp(sourceLib, targetLib, { recursive: true });
+  // ESM marker: without it every hook run pays a parse retry and prints a
+  // MODULE_TYPELESS_PACKAGE_JSON warning on stderr.
+  let version = '0.0.0';
+  try {
+    const pkg = JSON.parse(
+      await fs.readFile(path.join(path.dirname(sourceLib), 'package.json'), 'utf8'),
+    ) as { version?: string };
+    version = pkg.version ?? version;
+  } catch {
+    // Source package.json unavailable: keep the marker with a placeholder.
+  }
+  await atomicWriteFile(
+    path.join(path.dirname(targetLib), 'package.json'),
+    `${JSON.stringify({ name: 'bright-drift-claude-code', version, type: 'module', private: true }, null, 2)}\n`,
+  );
+  return path.join(targetLib, 'hooks');
 }
 
 /** The eight hook entries (§5.9-1), exec form: no shell anywhere (B9). */
@@ -145,12 +200,12 @@ export function commandsDirFor(opts: InstallOptions): string {
 }
 
 /** Forward-slash the cli path: the md bodies are read on every platform. */
-function cliPath(): string {
-  return path.join(hooksDir(), '..', 'cli.js').replaceAll('\\', '/');
+function cliPath(fromHooks = hooksDir()): string {
+  return path.join(fromHooks, '..', 'cli.js').replaceAll('\\', '/');
 }
 
-export function buildSlashCommands(): Record<string, string> {
-  const cli = cliPath();
+export function buildSlashCommands(fromHooks = hooksDir()): Record<string, string> {
+  const cli = cliPath(fromHooks);
   // Custom slash commands are prompt templates — CC has no client-side-only
   // command type, so the bang output always reaches the model. The trailing
   // instruction keeps the round-trip terse: relay verbatim, no commentary.
@@ -182,9 +237,9 @@ export function buildSlashCommands(): Record<string, string> {
   };
 }
 
-async function writeSlashCommands(dir: string): Promise<void> {
+async function writeSlashCommands(dir: string, fromHooks = hooksDir()): Promise<void> {
   await fs.mkdir(dir, { recursive: true });
-  for (const [name, content] of Object.entries(buildSlashCommands())) {
+  for (const [name, content] of Object.entries(buildSlashCommands(fromHooks))) {
     await atomicWriteFile(path.join(dir, name), content);
   }
 }
@@ -220,13 +275,15 @@ export function selfcheck(dir: string): { ok: boolean; detail: string } {
 
 export async function install(
   opts: InstallOptions,
-): Promise<{ settingsPath: string; stoppedDaemons: number }> {
-  const dir = hooksDir();
+): Promise<{ settingsPath: string; stoppedDaemons: number; hooksDir: string; relocated: boolean }> {
+  // npx cache/temp installs are relocated so the hook paths outlive the cache.
+  const source = hooksDir();
+  const dir = await deployStableHooks(source);
   const settingsPath = settingsPathFor(opts);
   const settings = await readSettings(settingsPath);
   mergeHooks(settings, buildHookEntries(dir));
   await atomicWriteFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
-  await writeSlashCommands(commandsDirFor(opts));
+  await writeSlashCommands(commandsDirFor(opts), dir);
 
   const stamp: InstallInfo = {
     version: SCHEMA_VERSION,
@@ -241,7 +298,7 @@ export async function install(
   // SessionStart launches the freshly installed build (smoke test 2026-09-02:
   // fixes appeared not to work until daemons were killed by hand).
   const stoppedDaemons = await stopDaemons();
-  return { settingsPath, stoppedDaemons };
+  return { settingsPath, stoppedDaemons, hooksDir: dir, relocated: dir !== source };
 }
 
 export interface UninstallOptions extends InstallOptions {

@@ -1,4 +1,5 @@
-import { hooksDir, install, selfcheck, uninstall } from './installer/install.js';
+import * as path from 'node:path';
+import { install, selfcheck, uninstall } from './installer/install.js';
 import { cmdDiff, cmdNodiff, cmdPause, cmdResume, cmdStatus } from './cli-commands.js';
 
 /**
@@ -36,14 +37,17 @@ async function main(argv: string[]): Promise<number> {
 
   switch (command) {
     case 'install': {
-      const { settingsPath, stoppedDaemons } = await install({ project });
+      const { settingsPath, stoppedDaemons, hooksDir, relocated } = await install({ project });
       console.log(`bright-drift hooks merged into ${settingsPath}`);
+      if (relocated) {
+        console.log(`hooks deployed to ${path.dirname(hooksDir)} (stable path; npx cache is not used)`);
+      }
       if (stoppedDaemons > 0) {
         console.log(
           `stopped ${stoppedDaemons} running daemon(s) — they relaunch on the next session with the freshly installed build`,
         );
       }
-      const check = selfcheck(hooksDir());
+      const check = selfcheck(hooksDir);
       if (check.ok) {
         console.log(`selfcheck ok (${check.detail})`);
       } else {
